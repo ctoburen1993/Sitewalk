@@ -18,6 +18,29 @@ It's the same app on both, so there's nothing separate to install from an app st
 
 Allow Location the first time. On Android, the back button closes any open popup. The app shell works offline once it's installed; map tiles and USGS elevations still need signal.
 
+## Send to office (field → computer)
+Tap **📤 Send to office**. It's on the Takeoff list, on each item's price card, on the Estimate tab, and at the top of **⇪ Export**.
+
+**First time:** the app asks for your **office email address** and saves it on the phone. To change it later, tap **Change** in the Send to office box, or **Change office email** in Export.
+
+**What it sends.** These are checked by default, and the app remembers your choice:
+- **Job file** (`.sitewalk.txt`), which opens the whole job on your computer
+- **Site drawing** (Letter PDF)
+
+You can also add the **Takeoff spreadsheet** and a **Proposal** draft.
+
+**Sending it:**
+1. Tap **Send**. The phone's share sheet opens.
+2. Pick **Mail** or **Gmail**.
+3. The office address is already copied, so tap **To** and **paste**, then send.
+
+Phones don't let an app fill in the To line on a shared email, which is why the address is copied for you. If the phone can't share the files (some Android phones and Excel files), they save to Downloads instead, and an email opens already addressed to the office for you to attach them.
+
+**On the computer:**
+1. Open your SiteWalk link in Chrome or Edge.
+2. Click the job name at the top left, choose **Import**, and pick the `.sitewalk.txt` file from the email.
+3. Adjust the rates, prices and equipment, then save the proposal PDF, print the drawing, or export to Excel.
+
 ## Export / email to yourself
 Tap **⇪ Export** (top bar, Estimate tab, site plan or proposal) and pick what to send:
 - **Takeoff spreadsheet**: Excel (.xlsx) with live formulas and a Rates tab
@@ -30,7 +53,7 @@ Tap **⇪ Export** (top bar, Estimate tab, site plan or proposal) and pick what 
 The site drawing's title block fills in your company from the Proposal screen, plus the job, client, scale, date and proposal number.
 
 ## Opening the app
-Tap the **SiteWalk** icon (the yellow excavator). The app opens on a blue start screen with the logo. Tap the yellow **Start takeoff** button. To pick up an earlier job, tap **Open a saved job** instead.
+Tap the **SiteWalk** icon (the yellow excavator). The app opens on a blue start screen with the logo. Tap the yellow **Start takeoff** button and type the **project name** (for example, *Smith residence, Lot 4*). The name appears on the takeoff, drawing, proposal and emails. To pick up an earlier job, tap **Open a saved job** instead.
 
 1. **Map.** The hybrid satellite map (imagery plus road and place labels) opens where you're standing.
 2. **Boundary.** Tap **Mark area / property boundary**, then choose how to mark it:
@@ -74,14 +97,20 @@ Features are reference marks on the map and drawing. They are **not priced by th
 Jobs started in older versions are converted automatically: work areas and red/blue features become takeoff lines.
 
 ## Building pad
-Add a **Building pad** line and measure the house corners. Then enter the **slab (finished floor) elevation**, for example 421.5. If you leave it blank, the app suggests one from the ground at the corners. The app then:
+Add a **Building pad** item (for example, type *Grade building pad*) and lay out the **house corners**. Walk to each corner and tap Mark, or tap them on the map. When you tap **Done**, the app pulls ground elevations for the pad if it doesn't have them yet, then asks for the **finish slab elevation**:
+- It shows the ground at the house corners (low, average, high) from the USGS data.
+- Type the finished floor elevation, for example 421.5, or tap a suggestion:
+  - **High corner + 6"**
+  - **Balance cut & fill**: the slab where the cut covers the fill plus 35%
+- Tap **Figure cut & fill**.
+
+The app then:
 - **Sets the pad top** at slab − 10" (4" slab + 6" stone), so 421.5 gives a pad at 420.67 ft.
 - **Sizes the pad** to run 6 ft past the house on every side.
 - **Slopes the edges at 3:1** up or down until they meet existing grade, using the LiDAR contours. This gives cut and fill for the whole pad, slopes included.
 - **Adds 35% to the fill** for compaction loss ("dirt needed"), then shows the net import or the extra dirt.
-- **Balance** sets the slab elevation so the cut covers the fill plus 35%.
 
-All of these values can be changed per pad: offset, slope, slab and stone thickness, compaction %, and topsoil strip. The cut/fill heat map shows on the map while the line is open.
+The price card shows the finish slab, pad elevation, cut and fill, with a **Change** button. In the item's details (Edit details), the **Finish slab elevation** box is at the top. Offset, side slope, slab and stone thickness, compaction % and topsoil strip are under **Pad settings**. The cut/fill heat map shows on the map while the item is open.
 
 ## Driveway stone
 **Driveway stone** defaults to centerline × 12 ft width × 6" thick at 1.5 tons/CY plus 15% compaction, with optional fabric.
@@ -118,6 +147,25 @@ What the work covers:
 - Trenches are dug with the ride-on trencher.
 - Pad side slopes are seeded and strawed by hand automatically. Add more with a **Seed & straw** takeoff line.
 
+**Material prices & quotes.** Tap **📋 Material prices** (on the Takeoff list or the Estimate tab) and enter quotes as you get them. Each material has a price, the supplier or trucking company, phone, quote date and notes.
+- **Built in:** fill dirt delivered ($/CY), topsoil, crusher run / GAB ($/TON), geotextile fabric, silt fence, grass seed, fertilizer, lime, straw, hired dump truck ($/HR), and the debris and dirt dump fees.
+- **＋ Add material** adds anything else, such as drain pipe, culverts or erosion matting, with its own unit.
+- **Use this price on new jobs too** (checked by default) saves the quote for future takeoffs. Uncheck it to use the price on this job only.
+- **Fill dirt** is priced whenever pads and grading need more dirt than they cut. A building pad's price card shows the CY to bring in with an **Enter quote** button.
+- **On any takeoff item**, the **Material** drop-down links it to a price on your list, and the item updates when the quote changes. Driveway stone and silt fence are linked from the start.
+- **The Excel export** lists every material price with its supplier and quote date on the Rates tab.
+
+**Editing the estimate.** Everything on the Estimate sheet can be changed:
+- **Tap any line's name (✎)** to change its description, quantity, rate per hour or material $ per unit.
+  - You can also type your own **labor, equipment, fuel or material $** (leave a box blank to keep the calculated amount).
+  - Or bill the line as a **lump sum**, one amount that replaces all of them.
+  - Edited lines get an orange edge and the word "edited". **Reset** puts one line back, **Undo all edits** puts the whole sheet back.
+  - **Remove** takes a line off the estimate, and **Restore** brings removed lines back.
+- **＋ Add lump sum** adds a description and an amount in any section, such as a permit fee, culvert pipe or rock allowance. It also shows on the Takeoff tab.
+- **Overhead & profit:** type a percent, or a dollar amount to use instead for this job. Clear the $ box to go back to the percent.
+- **Delivery & pickup $** in the Equipment table can be typed per job for any machine, including your truck and trailers (a mobilization charge). In **Edit / add equipment**, each machine has a default delivery charge, counted either **each way (× 2)** or **one time, round trip**.
+- A quantity changed on the sheet changes the price, not the measurement on the Takeoff tab, so check the wording in the proposal's scope of work too.
+
 **Schedule check.** Line items add up to operator hours and days (at your hours per day). Enter how many working days you think the whole job takes:
 - The app shows labor from the line items next to labor for your schedule, and the difference.
 - You choose what the bid uses: the higher of the two (the default), line items only, or your schedule.
@@ -128,14 +176,19 @@ What the work covers:
 ## Equipment
 Tap **🚜 Equipment** in the top bar, or **Choose equipment** on the Estimate tab.
 - **Check list:** a drop-down of check boxes. Check the machines this job needs and the takeoff re-prices right away.
-- **Starting list:** Truck, Small trailer, Large trailer, Tractor, Mini excavator, Excavator, Bulldozer, Trencher, Bobcat, Skid steer. Each has a **$/hour, $/day and $/week** rate, plus gal/hr and delivery each way.
+- **Starting list:** Silverado 2500 Truck, Small trailer, Large Gooseneck trailer, Kubota Tractor, Kubota KX-040 Mini excavator, Kubota KX80 Excavator, Case Bulldozer, Trencher, Bobcat, Kubota SCL1000 Skid Steer. Phones that saved the older generic list get these names on the next update, and keep any prices they changed. Everything is **owned** except the **Case Bulldozer** and the **Bobcat**, which are rented. Owned machines have no delivery charge (you haul them yourself), no rental waiver or tax, and can be billed by the hour. Each has a **$/hour, $/day and $/week** rate, plus gal/hr and delivery each way.
 - **Picking the machine for each job:** the app uses the best checked machine that can do the work.
   - **Digging and clearing:** excavator, else mini excavator.
   - **Grading and spreading:** bulldozer, else Bobcat, skid steer, mini excavator or tractor, at a lower speed.
   - **Trenching:** trencher, else mini excavator.
   - **Truck and trailers:** priced for every day of the job.
 - **Bill by:** in the Equipment table, choose Cheapest, Hour, Day or Week for each machine, and set the days. "Cheapest" uses day/week for rented machines (yards have a 1-day minimum) and can use hourly for equipment you own.
-- **Edit list…** lets you rename, re-price, add or remove equipment. For each machine you also set what it's used for, its speed compared with the main machine, whether it's rented (rented machines get the waiver and tax), and whether it starts checked on new jobs. **Save list** keeps it on this phone for every future takeoff.
+- **Edit / add equipment** (at the bottom of the Equipment list) opens your machines.
+  - Tap a machine to change its name, $/hour, $/day and $/week, owned or rented, delivery each way, fuel gal/hr, what it's used for (dig & clear, grade & spread, trench, truck/trailer), speed %, and whether it starts checked on new jobs. **Delete** is on the same screen (tap it twice).
+  - **＋ Add new equipment** adds a machine. It's checked for the current job unless you uncheck **Use it on this job**.
+  - Changes save on the phone as you go and are used for every future takeoff.
+- **Share your list with others:** in **Edit / add equipment**, tap **📤 Share list** and send the small `SiteWalk_equipment_list.txt` file. The other person taps **📥 Load list…**, picks the file, looks it over and taps **Use this list**.
+
 
 ## Proposal
 **Estimate → Proposal** builds a letter-size proposal for the owner or GC. It includes:

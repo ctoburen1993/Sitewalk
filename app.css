@@ -316,3 +316,48 @@ table.itemcost td{text-align:right;padding:7px 0;border-bottom:1px solid var(--l
 table.itemcost tr.sub th,table.itemcost tr.sub td{font-weight:700}
 table.itemcost tr.tot th,table.itemcost tr.tot td{font-weight:800;font-size:18px;border-bottom:0;color:var(--pri)}
 @media (max-width:759px){body.drawing #sheet.collapsed{max-height:26px}}
+
+/* ---- Send to office ---- */
+button.office{background:#FFC72C;color:#1b1b1b;font-weight:800}
+.offto{display:flex;align-items:center;gap:8px;background:var(--bg2);border-radius:10px;padding:8px 8px 8px 12px;margin-top:8px}
+.offto span{color:var(--ink2);font-size:13px}
+.offto b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.offto button{flex:0 0 auto;padding:6px 10px;font-size:13px}
+
+#splash:not(.hidden) ~ #modal{z-index:4100}   /* name the job over the start screen */
+#splash:not(.hidden) ~ #toast{z-index:4200}
+
+/* ---- equipment editor ---- */
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px}
+.rolechips{display:flex;flex-wrap:wrap;gap:6px}
+.rchip{display:flex;align-items:center;gap:6px;background:var(--bg2);border-radius:18px;padding:7px 12px;margin:0;font-size:14px;color:var(--ink);cursor:pointer}
+.rchip input{width:auto;margin:0}
+
+/* ---- editable sheet ---- */
+button.rowed{background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;text-align:left;cursor:pointer;display:inline;width:auto;font-weight:inherit}
+button.rowed i{font-style:normal;color:var(--pri);font-size:12px;margin-left:2px}
+table.sheet tr.edited th[scope=row]{box-shadow:inset 3px 0 0 var(--pri)}
+table.sheet tr.edited th small b{color:var(--pri)}
+.mkgrid{display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center}
+.mkgrid label{margin:0}
+.mkin{display:flex;align-items:center;gap:6px}
+.mkin input{width:80px;flex:0 0 auto}
+.mkin input:disabled{opacity:.45}
+.mkin .or{color:var(--ink2);font-size:13px;margin:0 2px}
+table.sheet input.cin.set{border-color:var(--pri);font-weight:700}
+
+/* ---- slab elevation ---- */
+.slabbox{background:var(--warn-bg);border:2px solid var(--pri);border-radius:12px;padding:10px 12px;margin-top:12px}
+.slabbox label{margin-top:0;font-weight:700;color:var(--ink)}
+.slabrow{display:flex;align-items:center;gap:10px;background:var(--bg2);border-left:4px solid var(--pri);border-radius:10px;padding:10px 12px;margin-top:10px}
+.slabrow div{flex:1;min-width:0}
+.slabrow span{display:block;font-size:12px;color:var(--ink2);text-transform:uppercase}
+.slabrow b{font-size:20px}
+.slabrow small{display:block;color:var(--ink2)}
+.slabrow button{flex:0 0 auto}
+
+/* ---- material prices ---- */
+.item .mprice{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.grid2 .full{grid-column:1/-1}
+.matnote{background:var(--bg2);border-radius:10px;padding:8px 10px;margin-top:8px;font-size:14px}
+.matnote button{margin-top:6px;padding:6px 10px;font-size:13px}

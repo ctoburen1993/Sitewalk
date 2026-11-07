@@ -105,6 +105,7 @@ function form(title, fields, okText = 'Save', extraHtml = '') {
       done(out);
     };
     const first = card.querySelector('input,select'); if (first && fields[0] && fields[0].type !== 'select') setTimeout(() => first.focus(), 50);
+    card.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#mOk').click(); } }));
   });
 }
 function confirmBox(msg, okText = 'OK') {
@@ -1118,7 +1119,7 @@ async function projectsDialog() {
     <div class="row mt"><button class="pri" id="pNew">+ New site</button><button class="sec" id="pRename">Rename</button></div>
     <div class="row mt"><button class="sec" id="pExport">Export</button><button class="sec" id="pImport">Import</button><button class="dng" id="pDelete">Delete</button></div>
     ${isStandalone() ? '' : '<button class="sec mt" id="pInstall" style="width:100%">📲 Install on this phone</button>'}
-    <button class="sec mt" id="pClose" style="width:100%">Close</button><input type="file" id="pFile" accept=".json,application/json" class="hidden">`;
+    <button class="sec mt" id="pClose" style="width:100%">Close</button><input type="file" id="pFile" accept=".json,.txt,application/json,text/plain" class="hidden">`;
   $('#modal').classList.remove('hidden');
   const close = () => $('#modal').classList.add('hidden');
   card.querySelectorAll('[data-proj]').forEach(b => b.onclick = () => { switchProject(b.dataset.proj); close(); });
@@ -1129,7 +1130,9 @@ async function projectsDialog() {
   $('#pExport').onclick = () => shareOrDownload((P.name || 'site').replace(/[^\w-]+/g, '_') + '.sitewalk.json', JSON.stringify(P), 'application/json');
   $('#pImport').onclick = () => $('#pFile').click();
   $('#pFile').onchange = async e => {
-    try { const p = JSON.parse(await e.target.files[0].text()); if (!p.areas) throw 0; p.id = uid(); store.projects.unshift(p); switchProject(p.id); close(); toast('Imported ' + p.name); }
+    const txt = await e.target.files[0].text(), eq = equipFromFile(txt);
+    if (eq && !/"areas"/.test(txt)) { close(); equipEditor(eq); return; }
+    try { const p = JSON.parse(txt); if (!p.areas) throw 0; p.id = uid(); store.projects.unshift(p); switchProject(p.id); close(); toast('Imported ' + p.name); }
     catch (err) { toast('Not a SiteWalk file'); }
   };
   $('#pDelete').onclick = async () => {
@@ -1832,10 +1835,23 @@ function showSplash() {
   $('#spOpen').hidden = !store.projects.some(p => !projectEmpty(p));
   $('#splash').classList.remove('hidden');
 }
-$('#spStart').onclick = () => { $('#splash').classList.add('hidden'); startTakeoffFlow(); };
+$('#spStart').onclick = async () => {
+  let name = '';
+  for (;;) {
+    const v = await form('New takeoff', [{ key: 'name', label: 'Project name', value: name, placeholder: 'e.g. Smith residence, Lot 4', help: 'Shows on the takeoff, drawing, proposal and emails. You can change it later.' }], 'Start');
+    if (!v) return;
+    name = (v.name || '').trim();
+    if (name) break;
+    toast('Type a project name to start', 3000);
+  }
+  $('#splash').classList.add('hidden');
+  startTakeoffFlow(name);
+};
 $('#spOpen').onclick = () => { $('#splash').classList.add('hidden'); if (!P.boundary) onOpen(); else fitAll(); projectsDialog(); };
-function startTakeoffFlow() {
-  if (!projectEmpty()) { const p = newProject('Takeoff ' + new Date().toLocaleDateString()); p.view = P.view; store.projects.unshift(p); switchProject(p.id); }
+function startTakeoffFlow(name) {
+  name = name || 'Takeoff ' + new Date().toLocaleDateString();
+  if (!projectEmpty()) { const p = newProject(name); p.view = P.view; store.projects.unshift(p); switchProject(p.id); }
+  else { P.name = name; save(true); render(); }
   if (!EMBED) { const sat = Object.keys(baseLayers)[0]; if (baseName !== sat) { map.removeLayer(baseLayers[baseName]); baseName = sat; baseLayers[sat].addTo(map); baseLayers[sat].bringToBack(); } labelsLayer.addTo(map); }
   setTab('site'); $('#sheet').classList.add('collapsed');
   ui.flow = true; flowCheck();
@@ -1901,19 +1917,31 @@ const DEFAULT_RATES = {
 // Equipment list — saved on the phone and reused on every takeoff. roles: dig / grade / trench / support.
 // speed = production vs. the main machine for that kind of work (100 = full speed).
 const DEFAULT_EQUIP = [
-  { id: 'truck',    name: 'Truck',          hour: 25,  day: 150, week: 600,  burn: 1.5, deliver: 0,   rented: false, on: true,  roles: ['support'], speed: 100 },
+  { id: 'truck',    name: 'Silverado 2500 Truck',          hour: 25,  day: 150, week: 600,  burn: 1.5, deliver: 0,   rented: false, on: true,  roles: ['support'], speed: 100 },
   { id: 'trailerS', name: 'Small trailer',  hour: 12,  day: 60,  week: 250,  burn: 0,   deliver: 0,   rented: false, on: false, roles: ['support'], speed: 100 },
-  { id: 'trailerL', name: 'Large trailer',  hour: 20,  day: 110, week: 450,  burn: 0,   deliver: 0,   rented: false, on: true,  roles: ['support'], speed: 100 },
-  { id: 'tractor',  name: 'Tractor',        hour: 40,  day: 250, week: 900,  burn: 1.5, deliver: 150, rented: true,  on: false, roles: ['grade'], speed: 40 },
-  { id: 'mini',     name: 'Mini excavator', hour: 70,  day: 450, week: 1500, burn: 2.0, deliver: 200, rented: true,  on: true,  roles: ['dig', 'grade', 'trench'], speed: 45 },
-  { id: 'exc',      name: 'Excavator',      hour: 135, day: 850, week: 2400, burn: 3.5, deliver: 350, rented: true,  on: true,  roles: ['dig'], speed: 100 },
-  { id: 'dozer',    name: 'Bulldozer',      hour: 100, day: 650, week: 1500, burn: 4.0, deliver: 250, rented: true,  on: true,  roles: ['grade'], speed: 100 },
-  { id: 'trencher', name: 'Trencher',       hour: 45,  day: 280, week: 980,  burn: 1.5, deliver: 150, rented: true,  on: true,  roles: ['trench'], speed: 100 },
+  { id: 'trailerL', name: 'Large Gooseneck trailer',  hour: 20,  day: 110, week: 450,  burn: 0,   deliver: 0,   rented: false, on: true,  roles: ['support'], speed: 100 },
+  { id: 'tractor',  name: 'Kubota Tractor',        hour: 40,  day: 250, week: 900,  burn: 1.5, deliver: 0, rented: false,  on: false, roles: ['grade'], speed: 40 },
+  { id: 'mini',     name: 'Kubota KX-040 Mini excavator', hour: 70,  day: 450, week: 1500, burn: 2.0, deliver: 0, rented: false,  on: true,  roles: ['dig', 'grade', 'trench'], speed: 45 },
+  { id: 'exc',      name: 'Kubota KX80 Excavator',      hour: 135, day: 850, week: 2400, burn: 3.5, deliver: 0, rented: false,  on: true,  roles: ['dig'], speed: 100 },
+  { id: 'dozer',    name: 'Case Bulldozer',      hour: 100, day: 650, week: 1500, burn: 4.0, deliver: 250, rented: true,  on: true,  roles: ['grade'], speed: 100 },
+  { id: 'trencher', name: 'Trencher',       hour: 45,  day: 280, week: 980,  burn: 1.5, deliver: 0, rented: false,  on: true,  roles: ['trench'], speed: 100 },
   { id: 'bobcat',   name: 'Bobcat',         hour: 60,  day: 375, week: 1150, burn: 2.5, deliver: 150, rented: true,  on: false, roles: ['grade'], speed: 60 },
-  { id: 'skid',     name: 'Skid steer',     hour: 50,  day: 300, week: 950,  burn: 2.0, deliver: 150, rented: true,  on: false, roles: ['grade'], speed: 50 }
+  { id: 'skid',     name: 'Kubota SCL1000 Skid Steer',     hour: 50,  day: 300, week: 950,  burn: 2.0, deliver: 0, rented: false,  on: false, roles: ['grade'], speed: 50 }
 ];
 const ROLE_LABEL = { dig: 'Digging & clearing', grade: 'Grading & spreading', trench: 'Trenching', support: 'Truck / trailer / support' };
-function equipList() { if (!Array.isArray(store.equipList) || !store.equipList.length) store.equipList = clone(DEFAULT_EQUIP); return store.equipList; }
+// v2 names the actual machines. Saved lists that still use the old generic names get the new names; prices and edits are kept.
+const EQUIP_V = 3, EQUIP_OLD_NAMES = { truck: 'Truck', trailerL: 'Large trailer', tractor: 'Tractor', mini: 'Mini excavator', exc: 'Excavator', dozer: 'Bulldozer', skid: 'Skid steer' };
+function equipList() {
+  if (!Array.isArray(store.equipList) || !store.equipList.length) { store.equipList = clone(DEFAULT_EQUIP); store.equipV = EQUIP_V; }
+  if (store.equipV !== EQUIP_V) {
+    store.equipList.forEach(e => { const d = DEFAULT_EQUIP.find(x => x.id === e.id); if (d && EQUIP_OLD_NAMES[e.id] && e.name === EQUIP_OLD_NAMES[e.id]) e.name = d.name; });
+    // v3: everything is owned except the bulldozer and Bobcat; owned machines are hauled on your own trailer (no delivery charge)
+    const OLD_DELIVER = { tractor: 150, mini: 200, exc: 350, trencher: 150, skid: 150 };
+    if ((store.equipV || 1) < 3) store.equipList.forEach(e => { if (OLD_DELIVER[e.id] != null && e.rented) { e.rented = false; if (+e.deliver === OLD_DELIVER[e.id]) e.deliver = 0; } });
+    store.equipV = EQUIP_V;
+  }
+  return store.equipList;
+}
 const eqById = id => equipList().find(e => e.id === id) || null;
 function equipOn(e) { return P.equipOn && Object.prototype.hasOwnProperty.call(P.equipOn, e.id) ? !!P.equipOn[e.id] : !!e.on; }
 // Best checked machine for a kind of work (fastest, then cheapest); falls back to the full list and flags it
@@ -1977,6 +2005,8 @@ function asmOf(id) {
     if (pk.e && (pk.e.speed || 100) !== 100 && !(P.asm && P.asm[id] && P.asm[id].prod)) A.prod = A.prod * (pk.e.speed || 100) / 100;
   }
   if (id === 'seed' && A.mat == null) A.mat = seedMatPerMSF(R);
+  const MK = { import: 'fill', tsImport: 'topsoil', stone: 'stone', fabric: 'fabric' }[id];
+  if (MK && !(P.asm && P.asm[id] && P.asm[id].mat != null)) A.mat = matPrice(MK);
   if (A.crew == null) A.crew = 1;
   return A;
 }
@@ -1992,6 +2022,11 @@ function costRow(sec, id, desc, qty, extra) {
   return { sec, asm: id, desc, qty, unit: extra.unit || A.unit, prod, hrs, opHrs: A.crew ? hrs : 0, crewRate, labor, equip, gal, fuel, mat, matT, total: labor + equip + fuel + matT,
     machine: A.equip || null, hire, matRef: extra.matRef || { asm: id }, lockProd: !!(A.lockProd || extra.lockProd), lockMat: !!extra.lockMat,
     crewTxt: A.crew ? 'operator' : '', eqTxt: hire ? 'Hired dump truck' : eq ? eq.name + (A.missing ? ' — not checked for this job' : '') : (A.crew ? 'by hand' : ''), missing: !!(eq && A.missing), group: sec, scope: extra.scope || null };
+}
+// Delivery & pickup for one job: what you typed for this job, else the machine's charge (one-time, or each way × 2)
+function delivOf(e) {
+  const o = P.sched && P.sched.deliv && P.sched.deliv[e.id];
+  return o != null ? +o : e.delivOnce ? (+e.deliver || 0) : (+e.deliver || 0) * 2;
 }
 // Machine cost by the hour, the day, or the week (5-day weeks); 'auto' takes the cheapest
 function billCost(e, hrs, days, basis) {
@@ -2009,7 +2044,7 @@ function billCost(e, hrs, days, basis) {
 function estimate() {
   P.rates = normRates(P.rates);
   if (P.asmV !== RATES_V) { P.asm = {}; P.asmV = RATES_V; }
-  P.sched = P.sched || { days: null, rent: {} }; P.sched.rent = P.sched.rent || {}; P.sched.basis = P.sched.basis || {};
+  P.sched = P.sched || { days: null, rent: {} }; P.sched.rent = P.sched.rent || {}; P.sched.basis = P.sched.basis || {}; P.sched.deliv = P.sched.deliv || {};
   const R = P.rates, F = P.factors, rows = [], notes = [];
   const push = r => { if (r.qty > 1e-6 || r.asm === 'allow' || r.asm === 'adjust') rows.push(r); return r; };
   // --- the takeoff lines: each one measured on the map (or typed), priced with its own machine and rate
@@ -2020,11 +2055,11 @@ function estimate() {
     const eq = x.noEquip || !Ln.equip ? null : eqById(Ln.equip), n = lineNo(Ln);
     const hrs = prod > 0 ? qty / prod : 0, labor = hrs * crew, gal = eq ? hrs * (+eq.burn || 0) : 0, fuel = gal * R.fuel, matT = qty * (mat || 0);
     return { sec: SECKEY[Ln.sec] || SEC.other, asm: x.asm || 'line', desc: `#${n} ${desc}`, qty, unit, prod, hrs, opHrs: hrs, crewRate: crew, labor, equip: 0, gal, fuel, mat: mat || 0, matT, total: labor + fuel + matT,
-      machine: eq ? eq.id : null, hire: false, matRef: x.matRef || { line: Ln.id }, prodRef: x.prodRef === null ? null : (x.prodRef || { line: Ln.id, key: 'prod' }), lockProd: x.prodRef === null, lockMat: !!x.lockMat,
+      machine: eq ? eq.id : null, hire: false, matRef: x.matRef || (Ln.matKey && matDef(Ln.matKey) ? { mk: Ln.matKey } : { line: Ln.id }), prodRef: x.prodRef === null ? null : (x.prodRef || { line: Ln.id, key: 'prod' }), lockProd: x.prodRef === null, lockMat: !!x.lockMat,
       crewTxt: prod > 0 ? 'operator' : '', eqTxt: eq ? eq.name + (equipOn(eq) ? '' : ' — not checked for this job') : (prod > 0 ? 'by hand' : ''), missing: !!(eq && !equipOn(eq)), lineId: Ln.id, lineNo: n };
   };
   (P.lines || []).forEach(Ln => {
-    const q = lineQty(Ln), p = Ln.params || {}, mat = Ln.mat, C = CALC[Ln.calc] || CALC.ls;
+    const q = lineQty(Ln), p = Ln.params || {}, mat = Ln.matKey && matDef(Ln.matKey) ? matPrice(Ln.matKey) : Ln.mat, C = CALC[Ln.calc] || CALC.ls;
     if (C.geom && !q.measured && Ln.typed == null) { unmeasured.push(Ln); return; }
     if (Ln.loads && Ln.calc !== 'pad' && Ln.calc !== 'grade') loads += q.qty * Ln.loads;
     if (Ln.calc === 'pad') {
@@ -2041,7 +2076,7 @@ function estimate() {
     } else if (Ln.calc === 'stone') {
       push(lineRow(Ln, `${Ln.desc} ${num(p.depthIn)}", delivered`, q.qty, 'TON', 0, mat, { noEquip: true, prodRef: null }));
       push(lineRow(Ln, `${Ln.desc} — spread & compact`, q.qty, 'TON', Ln.prod, 0, { lockMat: true }));
-      if (q.fabricSY) push(lineRow(Ln, `${Ln.desc} — geotextile fabric, by hand`, q.fabricSY, 'SY', 400, 0.85, { noEquip: true, prodRef: null, lockMat: true }));
+      if (q.fabricSY) push(lineRow(Ln, `${Ln.desc} — geotextile fabric, by hand`, q.fabricSY, 'SY', 400, matPrice('fabric'), { noEquip: true, prodRef: null, matRef: { mk: 'fabric' } }));
     } else if (Ln.calc === 'ls') push(lineRow(Ln, Ln.desc, 1, 'LS', 0, mat || 0, { asm: 'allow', noEquip: true, prodRef: null }));
     else if (Ln.calc === 'hrs') push(lineRow(Ln, Ln.desc, q.qty, 'HR', 1, mat || 0, { prodRef: null }));
     else {
@@ -2061,13 +2096,33 @@ function estimate() {
   }
   // --- dirt balance across pads and grading: import or haul off the difference
   const net = cut - need;
-  if (net < -0.5) push(costRow(SEC.earth, 'import', `Fill dirt delivered (${num(-net)} CY short + ${F.swellPct}% loose)`, -net * (1 + F.swellPct / 100)));
+  if (net < -0.5) push(costRow(SEC.earth, 'import', `Fill dirt delivered (${num(-net)} CY short + ${F.swellPct}% loose)${matInfo('fill').vendor ? ' — ' + matInfo('fill').vendor : ''}`, -net * (1 + F.swellPct / 100), { matRef: { mk: 'fill' } }));
   else if (net > 0.5) {
     const lcy = net * (1 + F.swellPct / 100), n = Math.ceil(lcy / F.truckLCY);
     push(costRow(SEC.earth, 'loadOut', `Load excess dirt (${n} loads)`, n));
     push(costRow(SEC.earth, 'export', `Haul off excess dirt (${num(lcy)} loose CY) — hired truck`, n, { prod: 1 / (R.truckCycleHr || 1), mat: R.dirtDumpFee, matRef: { rate: 'dirtDumpFee' } }));
   }
   if (R.seedSlopes && slopesSF > 50) push(costRow(SEC.grass, 'seed', 'Pad side slopes — seed, fertilize, lime & straw', slopesSF / 1000, { scope: { kind: 'seed', sf: slopesSF, slopes: true }, matRef: { rate: 'seedMix' }, lockMat: true }));
+  // --- your edits to the sheet (P.ovr, by row key): name, quantity, removed rows, lump sums — before machine hours are figured
+  P.ovr = P.ovr || {};
+  const keyed = {}, hidden = [];
+  const rekey = () => rows.forEach(r => { if (r.key) return; const b = r.lineId ? 'L:' + r.lineId : r.asm + '|' + r.sec; keyed[b] = (keyed[b] || 0) + 1; r.key = b + ':' + keyed[b]; });
+  const recalc = r => { r.hrs = r.prod > 0 ? r.qty / r.prod : 0; r.opHrs = r.crewTxt ? r.hrs : 0; r.labor = r.hrs * r.crewRate; const eq = r.machine ? eqById(r.machine) : null; r.gal = eq ? r.hrs * (+eq.burn || 0) : 0; r.fuel = r.gal * R.fuel; r.matT = r.qty * (r.mat || 0); r.equip = r.hire ? r.hrs * (+R.haulRate || 0) : 0; r.total = r.labor + r.equip + r.fuel + r.matT; };
+  const editRows = late => { rekey(); for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i], o = P.ovr[r.key]; if (!o) continue;
+    if (o.off) { if (!hidden.includes(r)) hidden.push(r); rows.splice(i, 1); continue; }
+    if (o.desc) r.desc = o.desc;
+    if (!late) {
+      if (o.qty != null && r.asm !== 'adjust') { r.qty = o.qty; recalc(r); }
+      if (o.ls != null) { r.hrs = r.opHrs = 0; r.machine = null; }   // a lump sum carries no machine hours
+    } else {
+      if (o.ls != null) { r.labor = r.equip = r.fuel = r.gal = 0; r.matT = o.ls; r.mat = r.qty ? o.ls / r.qty : o.ls; r.ls = o.ls; r.total = o.ls; r.edited = true; continue; }
+      ['labor', 'equip', 'fuel', 'matT'].forEach(k => { if (o[k] != null) { r[k] = o[k]; (r.ovk = r.ovk || {})[k] = true; } });
+      r.total = r.labor + r.equip + r.fuel + r.matT;
+    }
+    if (o.desc || o.qty != null || r.ovk) r.edited = true;
+  } };
+  editRows(false);
   // --- machines: hours from the line items, days on the job, billed by hour / day / week
   const itemHrs0 = rows.reduce((t, r) => t + (r.opHrs || 0), 0);
   const jobDays = P.sched.days > 0 ? P.sched.days : Math.max(1, Math.ceil(itemHrs0 / R.hrsPerDay - 1e-9));
@@ -2079,14 +2134,16 @@ function estimate() {
     const bc = billCost(e, x.hrs, days, P.sched.basis[e.id] || 'auto');
     const extra = e.rented ? bc.cost * (R.waiverPct + R.rentTaxPct) / 100 : 0;
     const supGal = x.sup ? (+e.burn || 0) * days : 0;
-    return { k: e.id, name: e.name, hrs: x.hrs, auto, days, how: bc.how, basis: P.sched.basis[e.id] || 'auto', billedBy: bc.basis, rent: bc.cost, extra, deliver: (+e.deliver || 0) * 2, rented: !!e.rented,
-      support: x.sup, gal: supGal, fuel: supGal * R.fuel, total: bc.cost + extra + (+e.deliver || 0) * 2 + supGal * R.fuel };
+    const dv = delivOf(e);
+    return { k: e.id, name: e.name, hrs: x.hrs, auto, days, how: bc.how, basis: P.sched.basis[e.id] || 'auto', billedBy: bc.basis, rent: bc.cost, extra, deliver: dv, delivSet: P.sched.deliv[e.id] != null, rented: !!e.rented,
+      support: x.sup, gal: supGal, fuel: supGal * R.fuel, total: bc.cost + extra + dv + supGal * R.fuel };
   });
   rentals.filter(x => !x.support).forEach(x => rows.forEach(r => { if (r.machine === x.k && x.hrs > 0) { const a = (x.rent + x.extra) * r.hrs / x.hrs; r.equip += a; r.total += a; } }));
   const sup = rentals.filter(x => x.support);
   if (sup.length) { const r = costRow(SEC.mob, 'support', `${sup.map(x => x.name).join(' & ')} on the job (${num(jobDays, 1)} days)`, 1); r.equip = sup.reduce((t, x) => t + x.rent + x.extra, 0); r.gal = sup.reduce((t, x) => t + x.gal, 0); r.fuel = sup.reduce((t, x) => t + x.fuel, 0); r.total = r.equip + r.fuel; r.eqTxt = 'support equipment'; rows.unshift(r); }
   const delv = rentals.filter(x => x.deliver > 0);
-  if (delv.length) rows.unshift(costRow(SEC.mob, 'deliver', `Equipment delivery & pickup — ${delv.map(x => x.name).join(', ')}`, delv.length * 2, { mat: delv.reduce((t, x) => t + x.deliver, 0) / (delv.length * 2), lockMat: true, matRef: { rate: 'deliver' } }));
+  if (delv.length) rows.unshift(costRow(SEC.mob, 'deliver', `Delivery & pickup — ${delv.map(x => x.name).join(', ')}`, delv.length, { unit: 'EA', mat: delv.reduce((t, x) => t + x.deliver, 0) / delv.length, lockMat: true, matRef: { rate: 'deliver' } }));
+  editRows(true);
   const byLine = {};
   rows.forEach(r => { if (!r.lineId) return; const t = byLine[r.lineId] = byLine[r.lineId] || { hrs: 0, labor: 0, equip: 0, fuel: 0, matT: 0, total: 0 }; ['hrs', 'labor', 'equip', 'fuel', 'matT', 'total'].forEach(k => { t[k] += r[k] || 0; }); });
   // --- schedule check: itemized operator hours vs the operator's own estimate
@@ -2096,39 +2153,41 @@ function estimate() {
   const laborSched = schedDays ? schedDays * R.hrsPerDay * R.operator * (1 + R.burdenPct / 100) : null;
   let adj = 0;
   if (schedDays) adj = R.laborBasis === 'items' ? 0 : R.laborBasis === 'schedule' ? laborSched - laborItems : Math.max(0, laborSched - laborItems);
-  if (Math.abs(adj) > 0.5) { const r = costRow(SEC.sched, 'adjust', `Labor to match your schedule (${num(schedDays, 1)} days vs ${num(itemDays, 1)} itemized)`, 1); r.labor = adj; r.total = adj; rows.push(r); }
+  if (Math.abs(adj) > 0.5) { const r = costRow(SEC.sched, 'adjust', `Labor to match your schedule (${num(schedDays, 1)} days vs ${num(itemDays, 1)} itemized)`, 1); r.labor = adj; r.total = adj; rows.push(r); editRows(true); }
   // --- totals
   const sum = k => rows.reduce((t, r) => t + (r[k] || 0), 0);
   const mat = sum('matT'), labor = sum('labor'), equip = sum('equip'), fuel = sum('fuel'), direct = mat + labor + equip + fuel;
-  const oh = direct * R.ohPct / 100, profit = (direct + oh) * R.profitPct / 100, total = direct + oh + profit;
+  const MK = P.markup = P.markup || {};   // overhead / profit as a fixed $ amount for this job (blank = use the %)
+  const oh = MK.oh != null ? MK.oh : direct * R.ohPct / 100, profit = MK.profit != null ? MK.profit : (direct + oh) * R.profitPct / 100, total = direct + oh + profit;
   const secs = SEC_ORDER.map(s => ({ name: s, rows: rows.filter(r => r.sec === s) })).filter(s => s.rows.length).map(s => Object.assign(s, { total: s.rows.reduce((t, r) => t + r.total, 0) }));
   rows.forEach(r => { r.ext = r.total; r.price = r.qty ? r.total / r.qty : 0; });
   return { rows, lines: rows, secs, mat, labor, equip, fuel, direct, oh, profit, total, sub: direct, markup: oh + profit,
     hrs: itemHrs, gal: sum('gal'), loads, cut, need, net, notes, rentals,
     sched: { itemHrs, itemDays, schedDays, laborItems, laborSched, adj, basis: R.laborBasis },
     jobDays, missing: [...new Set(rows.filter(r => r.missing).map(r => r.eqTxt.split(' — ')[0]))],
-    unpriced: rows.filter(r => r.asm === 'allow' && !r.mat).length, byLine, unmeasured };
+    unpriced: rows.filter(r => r.asm === 'allow' && !r.mat && !r.ls).length, byLine, unmeasured, hidden, edited: rows.filter(r => r.edited).length,
+    ohTxt: MK.oh != null ? 'Overhead (set $)' : `Overhead ${R.ohPct}%`, profitTxt: MK.profit != null ? 'Profit (set $)' : `Profit ${R.profitPct}%` };
 }
 
 // ---------------- takeoff sheet (Estimate tab) ----------------
 function estimateHtml() {
   const E = estimate(), R = P.rates, S = E.sched;
   const m = n => money(n), cellIn = (attrs, v, cls) => `<input class="cin${cls ? ' ' + cls : ''}" type="number" inputmode="decimal" step="any" ${attrs} value="${v}">`;
-  const matAttr = r => r.matRef.line ? `data-lmat="${r.matRef.line}"` : r.matRef.feat ? `data-mfeat="${r.matRef.feat}"` : r.matRef.area ? `data-marea="${r.matRef.area}" data-mkey="${r.matRef.key || 'price'}"` : r.matRef.rate ? `data-mrate="${r.matRef.rate}"` : `data-masm="${r.matRef.asm}"`;
+  const matAttr = r => r.matRef.mk ? `data-matk="${r.matRef.mk}"` : r.matRef.line ? `data-lmat="${r.matRef.line}"` : r.matRef.feat ? `data-mfeat="${r.matRef.feat}"` : r.matRef.area ? `data-marea="${r.matRef.area}" data-mkey="${r.matRef.key || 'price'}"` : r.matRef.rate ? `data-mrate="${r.matRef.rate}"` : `data-masm="${r.matRef.asm}"`;
   const fmtQ = r => num(r.qty, r.unit === 'AC' || r.unit === 'MSF' ? 2 : r.unit === 'TON' ? 1 : 0);
   const fmtP = r => r.prod >= 10 ? num(r.prod) : r.prod >= 1 ? num(r.prod, 1) : num(r.prod, 3);
   const MAT_ROWS = new Set(['import', 'tsImport', 'stone', 'fabric', 'plant', 'allow', 'debris', 'export', 'trench']);
-  const body = E.secs.map(s => `<tr class="sech"><th colspan="11"><span>${esc(s.name)}</span></th></tr>` + s.rows.map(r => `<tr>
-      <th scope="row">${esc(r.desc)}<small>${esc([r.crewTxt, r.eqTxt].filter(Boolean).join(' · '))}</small></th>
+  const body = E.secs.map(s => `<tr class="sech"><th colspan="11"><span>${esc(s.name)}</span></th></tr>` + s.rows.map(r => `<tr${r.edited ? ' class="edited"' : ''}>
+      <th scope="row"><button class="rowed" data-row="${esc(r.key)}" aria-label="Edit ${esc(r.desc)}">${esc(r.desc)} <i>✎</i></button><small>${r.ls != null ? 'lump sum' : esc([r.crewTxt, r.eqTxt].filter(Boolean).join(' · '))}${r.edited ? ' · <b>edited</b>' : ''}</small></th>
       <td>${r.asm === 'adjust' ? '' : fmtQ(r)}</td><td>${r.asm === 'adjust' ? '' : r.unit}</td>
       <td>${r.lockProd || r.prod === 0 ? (r.prod ? fmtP(r) : '—') : cellIn(r.prodRef ? `data-lprod="${r.prodRef.line}" data-lkey="${r.prodRef.key}"${r.prodRef.param ? ' data-lparam="1"' : ''} aria-label="Production per hour, ${esc(r.desc)}"` : `data-prod="${r.asm}" aria-label="Production per hour, ${esc(r.desc)}"`, +r.prod.toFixed(3))}</td>
       <td>${r.hrs ? num(r.hrs, 1) : '—'}</td><td>${r.labor ? m(r.labor) : '—'}</td><td>${r.equip ? m(r.equip) : '—'}</td><td>${r.fuel ? m(r.fuel) : '—'}</td>
-      <td>${r.lockMat ? (r.mat ? '$' + num(r.mat, 2) : '—') : MAT_ROWS.has(r.asm) || r.mat || r.lineId ? cellIn(`${matAttr(r)} aria-label="Material dollars per unit, ${esc(r.desc)}"`, r.mat ? +(+r.mat).toFixed(2) : '', r.asm === 'allow' && !r.mat ? 'need' : '') : '—'}</td>
+      <td>${r.ls != null ? 'LS' : r.lockMat ? (r.mat ? '$' + num(r.mat, 2) : '—') : MAT_ROWS.has(r.asm) || r.mat || r.lineId ? cellIn(`${matAttr(r)} aria-label="Material dollars per unit, ${esc(r.desc)}"`, r.mat ? +(+r.mat).toFixed(2) : '', r.asm === 'allow' && !r.mat ? 'need' : '') : '—'}</td>
       <td>${r.matT ? m(r.matT) : '—'}</td><td><b>${m(r.total)}</b></td></tr>`).join('') +
     `<tr class="secsub"><th colspan="10" class="sl"><span>${esc(s.name)} subtotal</span></th><td>${m(s.total)}</td></tr>`).join('');
   const rentRows = E.rentals.map(x => `<tr><th scope="row">${esc(x.name)}<small>${x.support ? 'support · on the job every day' : `${num(x.hrs, 1)} run hrs → ${x.auto} day${x.auto > 1 ? 's' : ''}`}${x.rented ? '' : ' · owned'}</small></th>
       <td><select class="cin" data-basis="${x.k}" aria-label="Bill ${esc(x.name)} by">${[['auto', 'Cheapest'], ['hour', 'Hour'], ['day', 'Day'], ['week', 'Week']].map(([v, t]) => `<option value="${v}" ${x.basis === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
-      <td>${cellIn(`data-rent="${x.k}" aria-label="Days on the job, ${esc(x.name)}"`, x.days)}</td><td>${esc(x.how)}</td><td>${m(x.rent)}</td><td>${x.extra ? m(x.extra) : '—'}</td><td>${x.deliver ? m(x.deliver) : '—'}</td><td>${x.fuel ? m(x.fuel) : '—'}</td><td><b>${m(x.total)}</b></td></tr>`).join('');
+      <td>${cellIn(`data-rent="${x.k}" aria-label="Days on the job, ${esc(x.name)}"`, x.days)}</td><td>${esc(x.how)}</td><td>${m(x.rent)}</td><td>${x.extra ? m(x.extra) : '—'}</td><td>${cellIn(`data-deliv="${x.k}" aria-label="Delivery and pickup for this job, ${esc(x.name)}"`, x.deliver ? +x.deliver.toFixed(2) : '', x.delivSet ? 'set' : '')}</td><td>${x.fuel ? m(x.fuel) : '—'}</td><td><b>${m(x.total)}</b></td></tr>`).join('');
   const rin = (k, l, step) => `<div><label for="r_${k}">${l}</label><input id="r_${k}" type="number" inputmode="decimal" step="${step || 'any'}" data-rate="${k}" value="${R[k]}"></div>`;
   const rsel = (k, l, opts) => `<div><label for="r_${k}">${l}</label><select id="r_${k}" data-rate="${k}">${opts.map(([v, t]) => `<option value="${v}" ${String(R[k]) === String(v) ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`;
   const diff = S.schedDays ? S.laborSched - S.laborItems : null;
@@ -2138,11 +2197,12 @@ function estimateHtml() {
   <div class="costcards">
     <div><span>Material</span><b>${m(E.mat)}</b></div><div><span>Labor</span><b>${m(E.labor)}</b></div>
     <div><span>Equip. rental</span><b>${m(E.equip)}</b></div><div><span>Fuel</span><b>${m(E.fuel)}</b></div>
-    <div><span>Direct cost</span><b>${m(E.direct)}</b></div><div><span>Overhead ${R.ohPct}%</span><b>${m(E.oh)}</b></div>
-    <div><span>Profit ${R.profitPct}%</span><b>${m(E.profit)}</b></div><div class="tot"><span>Bid total</span><b>${m(E.total)}</b></div>
+    <div><span>Direct cost</span><b>${m(E.direct)}</b></div><div><span>${E.ohTxt}</span><b>${m(E.oh)}</b></div>
+    <div><span>${E.profitTxt}</span><b>${m(E.profit)}</b></div><div class="tot"><span>Bid total</span><b>${m(E.total)}</b></div>
   </div>
   ${E.unmeasured.length ? `<div class="warn">Not measured yet, so not priced: ${E.unmeasured.map(Ln => `#${lineNo(Ln)} ${esc(Ln.desc)}`).join(', ')}. Measure ${E.unmeasured.length > 1 ? 'them' : 'it'} on the Takeoff tab.</div>` : ''}
   ${E.unpriced ? `<div class="warn">${E.unpriced} allowance${E.unpriced > 1 ? 's need' : ' needs'} a dollar amount — type it in the highlighted Mat $ box.</div>` : ''}
+  <button class="pri big office" id="eOffice" style="width:100%;margin-top:10px">📤 Send to office</button>
   <div class="row mt"><button class="pri" id="eProp">📝 Proposal</button><button class="pri" id="eExport">⇪ Export / email</button></div>
   <div class="row mt"><button class="sec" id="eXlsx">Excel</button><button class="sec" id="eCsv">CSV</button><button class="sec" id="ePlan">Drawing</button></div>
 
@@ -2163,9 +2223,10 @@ function estimateHtml() {
   </section>
 
   <div class="row" style="align-items:end;justify-content:space-between"><h3 style="margin-bottom:6px">Equipment</h3><button class="sec" id="eEquip" style="flex:0 0 auto;padding:8px 12px">🚜 Choose equipment</button></div>
+  <button class="sec" id="eMat" style="width:100%;margin:0 0 10px">📋 Material prices &amp; quotes</button>
   ${E.missing.length ? `<div class="warn">Not checked for this job but needed: ${esc(E.missing.join(', '))}. Check it in Equipment, or check a machine that can do that work.</div>` : ''}
   <div class="sheetwrap" role="region" aria-label="Equipment cost" tabindex="0"><table class="sheet rent">
-    <thead><tr><th scope="col">Machine</th><th scope="col">Bill by</th><th scope="col">Days</th><th scope="col">Billed as</th><th scope="col">Cost</th><th scope="col">Waiver + tax</th><th scope="col">Delivery (2 trips)</th><th scope="col">Fuel</th><th scope="col">Total</th></tr></thead>
+    <thead><tr><th scope="col">Machine</th><th scope="col">Bill by</th><th scope="col">Days</th><th scope="col">Billed as</th><th scope="col">Cost</th><th scope="col">Waiver + tax</th><th scope="col">Delivery &amp; pickup $</th><th scope="col">Fuel</th><th scope="col">Total</th></tr></thead>
     <tbody>${rentRows || '<tr><td colspan="9" style="text-align:left">No equipment on this job.</td></tr>'}</tbody></table></div>
   ${E.rentals.length ? `<div class="row mt"><button class="sec" id="eRentAuto">Days from line items</button>${S.schedDays ? `<button class="sec" id="eRentSched">Keep every machine ${num(S.schedDays, 1)} days</button>` : ''}</div>` : ''}
 
@@ -2175,12 +2236,21 @@ function estimateHtml() {
     <tbody>${body}</tbody>
     <tfoot>
       <tr><th colspan="4" class="sl"><span>Direct cost</span></th><td>${num(E.hrs, 1)}</td><td>${m(E.labor)}</td><td>${m(E.equip)}</td><td>${m(E.fuel)}</td><td></td><td>${m(E.mat)}</td><td>${m(E.direct)}</td></tr>
-      <tr><th colspan="10" class="sl"><span>Overhead ${R.ohPct}%</span></th><td>${m(E.oh)}</td></tr>
-      <tr><th colspan="10" class="sl"><span>Profit ${R.profitPct}%</span></th><td>${m(E.profit)}</td></tr>
+      <tr><th colspan="10" class="sl"><span>${E.ohTxt}</span></th><td>${m(E.oh)}</td></tr>
+      <tr><th colspan="10" class="sl"><span>${E.profitTxt}</span></th><td>${m(E.profit)}</td></tr>
       <tr class="grand"><th colspan="10" class="sl"><span>Bid total</span></th><td>${m(E.total)}</td></tr>
     </tfoot></table></div>
-  <div class="muted mt">Rate /hr = units you finish per hour. Equip = the machine's cost spread over the lines that use it. Fuel = run hours × gal/hr × $${num(R.fuel, 2)}. Orange boxes are editable. Trees are pushed over and dug out — no stump grinding.</div>`
-  : '<div class="muted">Mark features (trees to remove, tree clouds, structures) and add a building pad, trench, driveway gravel or seed & straw area to build the takeoff.</div>'}
+  <div class="row mt"><button class="pri" id="eLump">＋ Add lump sum</button>${E.hidden.length ? `<button class="sec" id="eUnhide">Restore ${E.hidden.length} removed row${E.hidden.length > 1 ? 's' : ''}</button>` : ''}${E.edited ? `<button class="sec" id="eUnedit">Undo all ${E.edited} edit${E.edited > 1 ? 's' : ''}</button>` : ''}</div>
+  <section class="schedbox mt" aria-labelledby="mkH">
+    <h3 id="mkH">Overhead &amp; profit</h3>
+    <div class="mkgrid">
+      <label for="mkOhPct">Overhead</label><div class="mkin"><input id="mkOhPct" type="number" inputmode="decimal" step="any" data-rate="ohPct" value="${R.ohPct}" ${P.markup.oh != null ? 'disabled' : ''}><span>%</span><span class="or">or</span><span>$</span><input id="mkOh" type="number" inputmode="decimal" step="any" data-mk="oh" value="${P.markup.oh != null ? P.markup.oh : ''}" placeholder="${Math.round(E.oh)}"></div>
+      <label for="mkPrPct">Profit</label><div class="mkin"><input id="mkPrPct" type="number" inputmode="decimal" step="any" data-rate="profitPct" value="${R.profitPct}" ${P.markup.profit != null ? 'disabled' : ''}><span>%</span><span class="or">or</span><span>$</span><input id="mkPr" type="number" inputmode="decimal" step="any" data-mk="profit" value="${P.markup.profit != null ? P.markup.profit : ''}" placeholder="${Math.round(E.profit)}"></div>
+    </div>
+    <div class="muted" style="margin-top:4px">Type a percent, or a dollar amount to use instead (clear the $ box to go back to the percent).</div>
+  </section>
+  <div class="muted mt">Tap any line's name (✎) to edit it: name, quantity, rate, any dollar amount, bill it as a lump sum, or remove it. Rate /hr = units you finish per hour. Equip = the machine's cost spread over the lines that use it. Fuel = run hours × gal/hr × $${num(R.fuel, 2)}. Orange boxes are editable. Trees are pushed over and dug out — no stump grinding.</div>`
+  : '<div class="muted">Add work items on the Takeoff tab and lay them out on the map, or add a lump sum.</div><button class="pri mt" id="eLump" style="width:100%">＋ Add lump sum</button>'}
   <details ${E.rows.length ? '' : 'open'}><summary>Rates — labor, rental, fuel, materials &amp; markup</summary>
     <div class="grid2">${rin('operator', 'Operator (you) $/hr')}${rin('burdenPct', 'Labor burden % (SE tax, comp, ins.)')}${rin('hrsPerDay', 'Hours per working day', 0.5)}${rin('fuel', 'Diesel $/gal')}${rin('ohPct', 'Overhead %')}${rin('profitPct', 'Profit %')}${rin('waiverPct', 'Rental damage waiver %')}${rin('rentTaxPct', 'Rental sales tax %')}${rin('haulRate', 'Hired dump truck $/hr (with driver)')}${rin('truckCycleHr', 'Hired truck round trip (hr/load)')}${rin('dumpFee', 'Debris dump fee $/load')}${rin('dirtDumpFee', 'Dirt dump fee $/load')}
       ${rsel('debris', 'Tree & demo debris', [['haul', 'Haul off'], ['pile', 'Pile on site'], ['burn', 'Burn on site (Oct–Apr)']])}
@@ -2197,6 +2267,7 @@ function bindEstimate(all, on) {
   const numv = e => parseFloat(e.value);
   all('[data-prod]', e => { const v = numv(e); if (!(v > 0)) { toast('Rate must be more than 0'); render(); return; } P.asm = P.asm || {}; P.asm[e.dataset.prod] = Object.assign(P.asm[e.dataset.prod] || {}, { prod: v }); reRender(); }, 'change');
   all('[data-lprod]', e => { const Ln = P.lines.find(x => x.id === e.dataset.lprod), v = numv(e); if (!Ln) return; if (!(v > 0)) { toast('Rate must be more than 0'); render(); return; } if (e.dataset.lparam) Ln.params[e.dataset.lkey] = v; else Ln[e.dataset.lkey] = v; reRender(); }, 'change');
+  all('[data-matk]', e => { const v = numv(e); if (isFinite(v)) { const m = matInfo(e.dataset.matk); setMatPrice(e.dataset.matk, Object.assign({}, m, { price: v, date: new Date().toISOString().slice(0, 10) }), false); render(); toast('Price set for this job — Material prices to save it for new jobs', 3500); } }, 'change');
   all('[data-lmat]', e => { const Ln = P.lines.find(x => x.id === e.dataset.lmat), v = numv(e); if (Ln) { Ln.mat = isFinite(v) ? v : 0; reRender(); } }, 'change');
   all('[data-masm]', e => { P.asm = P.asm || {}; P.asm[e.dataset.masm] = Object.assign(P.asm[e.dataset.masm] || {}, { mat: numv(e) || 0 }); reRender(); }, 'change');
   all('[data-marea]', e => { const a = P.areas.find(x => x.id === e.dataset.marea); if (a) { a.p[e.dataset.mkey || 'price'] = numv(e) || 0; reRender(); } }, 'change');
@@ -2205,8 +2276,11 @@ function bindEstimate(all, on) {
   all('[data-rate]', e => { const k = e.dataset.rate; P.rates[k] = ['debris', 'laborBasis'].includes(k) ? e.value : k === 'seedSlopes' ? e.value === 'true' : (numv(e) || 0); if (k === 'hrsPerDay' && !(P.rates[k] > 0)) P.rates[k] = 8; reRender(); }, 'change');
   all('[data-basis]', e => { P.sched.basis[e.dataset.basis] = e.value; reRender(); }, 'change');
   on('#eEquip', () => openEquipMenu($('#eEquip')));
+  on('#eOffice', sendToOffice);
+  on('#eMat', () => openMatBook());
   on('#eEquipEdit', equipEditor);
   all('[data-sched]', e => { const v = numv(e); P.sched.days = v > 0 ? v : null; reRender(); }, 'change');
+  all('[data-deliv]', e => { const v = numv(e); if (e.value === '' || !isFinite(v)) delete P.sched.deliv[e.dataset.deliv]; else P.sched.deliv[e.dataset.deliv] = Math.max(0, v); reRender(); }, 'change');
   all('[data-rent]', e => { const v = numv(e); if (v > 0) P.sched.rent[e.dataset.rent] = v; else delete P.sched.rent[e.dataset.rent]; reRender(); }, 'change');
   on('#eRentAuto', () => { P.sched.rent = {}; reRender(); });
   on('#eRentSched', () => { const E = estimate(); E.rentals.forEach(x => { P.sched.rent[x.k] = Math.ceil(P.sched.days); }); reRender(); });
@@ -2214,6 +2288,80 @@ function bindEstimate(all, on) {
   on('#eRateReset', () => { P.rates = clone(DEFAULT_RATES); P.asm = {}; reRender(); toast('Rates reset to the researched defaults (equipment list unchanged)'); });
   on('#eProp', proposalDialog);
   on('#eXlsx', exportXlsx);
+  all('[data-row]', b => rowEditor(b.dataset.row));
+  on('#eLump', addLumpSum);
+  on('#eUnhide', () => { Object.keys(P.ovr || {}).forEach(k => { if (P.ovr[k].off) { delete P.ovr[k].off; if (!Object.keys(P.ovr[k]).length) delete P.ovr[k]; } }); reRender(); toast('Removed rows are back'); });
+  on('#eUnedit', async () => { if (await confirmBox('Undo every edit on the sheet (names, quantities, dollar amounts and lump sums)? Removed rows stay removed.', 'Undo edits')) { Object.keys(P.ovr || {}).forEach(k => { P.ovr[k] = P.ovr[k].off ? { off: true } : null; if (!P.ovr[k]) delete P.ovr[k]; }); } reRender(); });
+  all('[data-mk]', e => { const v = numv(e); P.markup = P.markup || {}; P.markup[e.dataset.mk] = isFinite(v) && e.value !== '' ? v : null; reRender(); }, 'change');
+}
+// ---- edit one line of the sheet
+function rowEditor(key) {
+  const strip = P.ovr[key]; delete P.ovr[key];
+  const base = estimate().rows.find(r => r.key === key);
+  if (strip) P.ovr[key] = strip;
+  const E = estimate(), r = E.rows.find(x => x.key === key) || base; if (!r) { toast('That line is no longer on the sheet'); return; }
+  const o = Object.assign({}, P.ovr[key] || {}), b = base || r, card = $('#modalCard'); card.classList.remove('wide');
+  const Ln = r.lineId ? P.lines.find(x => x.id === r.lineId) : null;
+  const canProd = !r.lockProd && r.prod > 0 && r.asm !== 'adjust', canMat = !r.lockMat && r.asm !== 'adjust' && !(r.matRef && (r.matRef.feat || r.matRef.area));
+  const nin = (id, label, val, ph, help) => `<div><label for="${id}">${label}</label><input id="${id}" type="number" inputmode="decimal" step="any" value="${val == null ? '' : val}" placeholder="${ph == null ? '' : ph}">${help ? `<div class="muted" style="font-size:12px;margin-top:3px">${help}</div>` : ''}</div>`;
+  const r2 = v => Math.round(v * 100) / 100;
+  card.innerHTML = `<h2 style="margin:0 0 2px">Edit line</h2><div class="muted">${esc(r.sec)}${Ln ? ` · takeoff item #${lineNo(Ln)}` : ' · added by the app'}</div>
+    <label for="reDesc">Description</label><input id="reDesc" value="${esc(o.desc || b.desc)}">
+    <div class="grid2">
+      ${r.asm === 'adjust' ? '' : nin('reQty', `Quantity (${esc(r.unit)})`, o.qty != null ? o.qty : '', r2(b.qty), o.qty != null ? `Measured: ${num(b.qty, 2)}` : 'Blank = measured amount')}
+      ${canProd ? nin('reProd', `Rate (${esc(r.unit)} per hour)`, +(+r.prod).toFixed(3), '', 'Changes this item’s production') : ''}
+      ${canMat ? nin('reMat', `Material $ per ${esc(r.unit)}`, o.ls != null ? '' : +(+r.mat || 0).toFixed(2), '0') : ''}
+    </div>
+    <h3>Dollar amounts</h3>
+    <div class="muted" style="margin:-4px 0 6px">Leave a box blank to use the calculated amount (shown in grey).</div>
+    <div class="grid2">
+      ${nin('reLabor', 'Labor $', o.labor, r2(b.labor))}${nin('reEquip', 'Equipment $', o.equip, r2(b.equip))}
+      ${nin('reFuel', 'Fuel $', o.fuel, r2(b.fuel))}${nin('reMatT', 'Material $', o.matT, r2(b.matT))}
+    </div>
+    <h3>Lump sum</h3>
+    ${nin('reLs', 'Bill this line as one amount, $', o.ls, '', 'Replaces labor, equipment, fuel and material for this line.')}
+    <div class="row" style="margin-top:16px"><button class="dng" id="reOff" type="button" style="flex:0 0 auto">Remove</button><button class="sec" id="reReset" type="button">Reset</button></div>
+    <div class="row mt"><button class="sec" id="reCancel" type="button">Cancel</button><button class="pri" id="reSave" type="button">Save</button></div>`;
+  $('#modal').classList.remove('hidden');
+  const close = () => $('#modal').classList.add('hidden');
+  const done = () => { calcCache.clear(); save(); close(); render(); };
+  const val = id => { const e = $('#' + id); if (!e || e.value === '') return null; const v = parseFloat(e.value); return isFinite(v) ? v : null; };
+  $('#reCancel').onclick = close;
+  $('#reOff').onclick = () => { P.ovr[key] = Object.assign(P.ovr[key] || {}, { off: true }); done(); toast('Line removed — Restore brings it back'); };
+  $('#reReset').onclick = () => { delete P.ovr[key]; done(); toast('Line back to the calculated amounts'); };
+  $('#reSave').onclick = () => {
+    const n = {}, d = $('#reDesc').value.trim();
+    if (d && d !== b.desc) n.desc = d;
+    ['qty:reQty', 'labor:reLabor', 'equip:reEquip', 'fuel:reFuel', 'matT:reMatT', 'ls:reLs'].forEach(s => { const [k, id] = s.split(':'), v = val(id); if (v != null) n[k] = Math.max(0, v); });
+    if (o.off) n.off = true;
+    if (Object.keys(n).length) P.ovr[key] = n; else delete P.ovr[key];
+    const pv = val('reProd');
+    if (canProd && pv != null && Math.abs(pv - r.prod) > 1e-9) {
+      if (!(pv > 0)) { toast('Rate must be more than 0'); return; }
+      if (r.prodRef) { const L2 = P.lines.find(x => x.id === r.prodRef.line); if (L2) { if (r.prodRef.param) L2.params[r.prodRef.key] = pv; else L2[r.prodRef.key] = pv; } }
+      else { P.asm = P.asm || {}; P.asm[r.asm] = Object.assign(P.asm[r.asm] || {}, { prod: pv }); }
+    }
+    const mv = val('reMat');
+    if (canMat && mv != null && Math.abs(mv - (+r.mat || 0)) > 1e-9 && n.ls == null) {
+      if (r.matRef && r.matRef.line) { const L2 = P.lines.find(x => x.id === r.matRef.line); if (L2) L2.mat = mv; }
+      else if (r.matRef && r.matRef.mk) setMatPrice(r.matRef.mk, Object.assign({}, matInfo(r.matRef.mk), { price: mv }), false);
+      else if (r.matRef && r.matRef.rate) P.rates[r.matRef.rate] = mv;
+      else { P.asm = P.asm || {}; P.asm[r.asm] = Object.assign(P.asm[r.asm] || {}, { mat: mv }); }
+    }
+    done();
+  };
+}
+// ---- a lump sum: just a description and an amount (also shows on the Takeoff tab)
+async function addLumpSum() {
+  const v = await form('Add lump sum', [
+    { key: 'desc', label: 'Description', value: '', placeholder: 'e.g. Rock hammer allowance, permit fee, culvert pipe' },
+    { key: 'amt', label: 'Amount $', type: 'number', value: '' },
+    { key: 'sec', label: 'Section', type: 'select', value: 'other', options: Object.entries(SECKEY) }
+  ], 'Add');
+  if (!v) return;
+  if (!v.desc || !(v.amt > 0)) { toast('Type a description and an amount'); return; }
+  const Ln = newLine(libById('allow')); Object.assign(Ln, { desc: v.desc, mat: v.amt, sec: v.sec });
+  P.lines.push(Ln); calcCache.clear(); save(); render(); toast(`Added ${v.desc} — ${money(v.amt)}`);
 }
 function estimateCSV() {
   const E = estimate(), q = s => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"', R = P.rates, S = E.sched;
@@ -2221,7 +2369,7 @@ function estimateCSV() {
     ['Section', 'Item', 'Qty', 'Unit', 'Rate/hr', 'Hours', 'Machine', 'Labor $', 'Equip $', 'Fuel gal', 'Fuel $', 'Mat $/unit', 'Material $', 'Total $']];
   E.rows.forEach(r => rows.push([r.sec, r.desc, r.qty.toFixed(2), r.unit, r.prod ? r.prod.toFixed(3) : '', r.hrs.toFixed(2), r.eqTxt, r.labor.toFixed(2), r.equip.toFixed(2), r.gal.toFixed(1), r.fuel.toFixed(2), (+r.mat || 0).toFixed(2), r.matT.toFixed(2), r.total.toFixed(2)]));
   rows.push([], ['', 'Direct cost', '', '', '', E.hrs.toFixed(1), '', E.labor.toFixed(2), E.equip.toFixed(2), E.gal.toFixed(1), E.fuel.toFixed(2), '', E.mat.toFixed(2), E.direct.toFixed(2)],
-    ['', `Overhead ${R.ohPct}%`, '', '', '', '', '', '', '', '', '', '', '', E.oh.toFixed(2)], ['', `Profit ${R.profitPct}%`, '', '', '', '', '', '', '', '', '', '', '', E.profit.toFixed(2)], ['', 'BID TOTAL', '', '', '', '', '', '', '', '', '', '', '', E.total.toFixed(2)],
+    ['', E.ohTxt, '', '', '', '', '', '', '', '', '', '', '', E.oh.toFixed(2)], ['', E.profitTxt, '', '', '', '', '', '', '', '', '', '', '', E.profit.toFixed(2)], ['', 'BID TOTAL', '', '', '', '', '', '', '', '', '', '', '', E.total.toFixed(2)],
     [], ['Schedule check'], ['Days from line items', S.itemDays.toFixed(1)], ['Your estimate (days)', S.schedDays || ''], ['Labor from items', S.laborItems.toFixed(2)], ['Labor for your schedule', S.laborSched == null ? '' : S.laborSched.toFixed(2)],
     [], ['Machine', 'Hours', 'Days', 'Billed as', 'Cost $', 'Waiver + tax $', 'Delivery $', 'Fuel $', 'Total $']);
   E.rentals.forEach(x => rows.push([x.name, x.hrs.toFixed(1), x.days, x.how, x.rent.toFixed(2), x.extra.toFixed(2), x.deliver.toFixed(2), x.fuel.toFixed(2), x.total.toFixed(2)]));
@@ -2237,7 +2385,8 @@ function buildXlsx() {
   const rates = [['Rates', R.region], ['Operator $/hr', R.operator], ['Labor burden %', R.burdenPct], ['Hours per day', R.hrsPerDay], ['Diesel $/gal', R.fuel], ['Overhead %', R.ohPct], ['Profit %', R.profitPct], ['Rental damage waiver %', R.waiverPct], ['Rental sales tax %', R.rentTaxPct], ['Hired dump truck $/hr', R.haulRate], [],
     ['Equipment', 'On this job', '$/hour', '$/day', '$/week', 'Gal/hr', 'Delivery each way', 'Rented']];
   equipList().forEach(e => rates.push([e.name, equipOn(e) ? 'Yes' : '', e.hour, e.day, e.week, e.burn, e.deliver, e.rented ? 'Yes' : 'Owned']));
-  rates.push([], ['Seed & straw per 1,000 SF', +seedMatPerMSF(R).toFixed(2)]);
+  rates.push([], ['Seed & straw per 1,000 SF', +seedMatPerMSF(R).toFixed(2)], [], ['Material prices', 'Unit', '$/unit', 'Supplier', 'Phone', 'Quote date', 'Notes']);
+  matDefs().forEach(d => { const m = matInfo(d.key); rates.push([d.name, d.unit, +m.price.toFixed(2), m.vendor, m.phone, m.date, m.note]); });
   const wsR = X.utils.aoa_to_sheet(rates); wsR['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 16 }, { wch: 8 }];
   const ws = X.utils.aoa_to_sheet([[`${P.name} — sitework takeoff`], [P.address || ''], [`Prepared ${new Date().toLocaleDateString()} · one-man crew, rented equipment`], [],
     ['Section', 'Item', 'Qty', 'Unit', 'Rate/hr', 'Hours', 'Labor $/hr', 'Labor $', 'Equip $/hr', 'Equip $', 'Fuel gal/hr', 'Fuel gal', 'Fuel $', 'Mat $/unit', 'Material $', 'Total $']]);
@@ -2247,17 +2396,19 @@ function buildXlsx() {
     X.utils.sheet_add_aoa(ws, [[r.sec, r.desc, +r.qty.toFixed(3), r.unit, r.prod ? +r.prod.toFixed(4) : 0]], { origin: `A${n}` });
     const f = (c, formula, v) => { ws[`${c}${n}`] = { t: 'n', f: formula, v }; };
     f('F', `IF(E${n}>0,C${n}/E${n},0)`, r.hrs);
-    if (r.asm === 'adjust') { ws[`G${n}`] = { t: 'n', v: 0 }; ws[`H${n}`] = { t: 'n', v: +r.labor.toFixed(2) }; }
+    const ov = r.ovk || {}, fixed = (c, v) => { ws[`${c}${n}`] = { t: 'n', v: +(+v).toFixed(2) }; };
+    if (r.asm === 'adjust' || r.ls != null || ov.labor) { ws[`G${n}`] = { t: 'n', v: 0 }; fixed('H', r.labor); }
     else { ws[`G${n}`] = { t: 'n', v: +r.crewRate.toFixed(2) }; f('H', `F${n}*G${n}`, r.labor); }
-    ws[`I${n}`] = { t: 'n', v: r.hrs ? +(r.equip / r.hrs).toFixed(2) : 0 }; f('J', `F${n}*I${n}`, r.equip);
-    ws[`K${n}`] = { t: 'n', v: r.hrs ? +(r.gal / r.hrs).toFixed(2) : 0 }; f('L', `F${n}*K${n}`, r.gal); f('M', `L${n}*Rates!$B$5`, r.fuel);
+    ws[`I${n}`] = { t: 'n', v: r.hrs ? +(r.equip / r.hrs).toFixed(2) : 0 }; if (ov.equip || r.ls != null) fixed('J', r.equip); else f('J', `F${n}*I${n}`, r.equip);
+    ws[`K${n}`] = { t: 'n', v: r.hrs ? +(r.gal / r.hrs).toFixed(2) : 0 }; f('L', `F${n}*K${n}`, r.gal); if (ov.fuel || r.ls != null) fixed('M', r.fuel); else f('M', `L${n}*Rates!$B$5`, r.fuel);
+    if (ov.matT) { ws[`N${n}`] = { t: 'n', v: r.qty ? +(r.matT / r.qty).toFixed(2) : 0 }; fixed('O', r.matT); f('P', `H${n}+J${n}+M${n}+O${n}`, r.total); return; }
     ws[`N${n}`] = { t: 'n', v: +(+r.mat || 0).toFixed(2) }; f('O', `C${n}*N${n}`, r.matT); f('P', `H${n}+J${n}+M${n}+O${n}`, r.total);
   });
   const last = r0 + E.rows.length - 1, t = last + 2;
   const put = (addr, v, formula) => { ws[addr] = formula ? { t: 'n', f: formula, v } : (typeof v === 'number' ? { t: 'n', v } : { t: 's', v }); };
   put(`B${t}`, 'Direct cost'); ['F', 'H', 'J', 'L', 'M', 'O', 'P'].forEach(c => put(`${c}${t}`, 0, `SUM(${c}${r0}:${c}${last})`));
-  put(`B${t + 1}`, 'Overhead'); put(`P${t + 1}`, E.oh, `P${t}*Rates!$B$6/100`);
-  put(`B${t + 2}`, 'Profit'); put(`P${t + 2}`, E.profit, `(P${t}+P${t + 1})*Rates!$B$7/100`);
+  put(`B${t + 1}`, E.ohTxt); if (P.markup && P.markup.oh != null) put(`P${t + 1}`, +E.oh.toFixed(2)); else put(`P${t + 1}`, E.oh, `P${t}*Rates!$B$6/100`);
+  put(`B${t + 2}`, E.profitTxt); if (P.markup && P.markup.profit != null) put(`P${t + 2}`, +E.profit.toFixed(2)); else put(`P${t + 2}`, E.profit, `(P${t}+P${t + 1})*Rates!$B$7/100`);
   put(`B${t + 3}`, 'BID TOTAL'); put(`P${t + 3}`, E.total, `P${t}+P${t + 1}+P${t + 2}`);
   ws['!ref'] = `A1:P${t + 3}`;
   ws['!cols'] = [{ wch: 20 }, { wch: 56 }, { wch: 9 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 9 }, { wch: 10 }, { wch: 9 }, { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 9 }, { wch: 10 }, { wch: 11 }, { wch: 12 }];
@@ -2272,6 +2423,107 @@ function buildXlsx() {
 
 
 // ======================================================================
+// Material prices — enter quotes as you get them (fill dirt, stone, topsoil, trucking …)
+// Job price (P.mat) → your saved price (store.matBook) → starting price. Seed, straw, trucking
+// and dump fees live in the job's Rates so the rest of the estimate keeps using them.
+// ======================================================================
+const MAT_BUILTIN = [
+  { key: 'fill', name: 'Fill dirt, delivered', unit: 'CY', price: 25, hint: 'Used when pads and grading need more dirt than the cut' },
+  { key: 'topsoil', name: 'Topsoil, delivered', unit: 'CY', price: 40 },
+  { key: 'stone', name: 'Crusher run / GAB, delivered', unit: 'TON', price: 32, hint: 'Driveway stone lines' },
+  { key: 'fabric', name: 'Geotextile fabric', unit: 'SY', price: 0.85 },
+  { key: 'silt', name: 'Silt fence', unit: 'LF', price: 1.10 },
+  { key: 'seed', name: 'Grass seed (KY-31 fescue)', unit: 'LB', rate: 'seedPrice' },
+  { key: 'fert', name: 'Fertilizer 10-10-10, 50 lb bag', unit: 'BAG', rate: 'fertBag' },
+  { key: 'lime', name: 'Pelletized lime, 40 lb bag', unit: 'BAG', rate: 'limeBag' },
+  { key: 'straw', name: 'Wheat straw', unit: 'BALE', rate: 'strawBale' },
+  { key: 'haul', name: 'Hired dump truck with driver', unit: 'HR', rate: 'haulRate', hint: 'Hauling off debris and extra dirt' },
+  { key: 'dumpDebris', name: 'Debris dump fee', unit: 'LOAD', rate: 'dumpFee' },
+  { key: 'dumpDirt', name: 'Dirt dump fee', unit: 'LOAD', rate: 'dirtDumpFee' }
+];
+function matDefs() {
+  const out = MAT_BUILTIN.slice(), seen = new Set(out.map(d => d.key));
+  (store.matDefs || []).concat(P.matDefs || []).forEach(d => { if (d && d.key && !seen.has(d.key)) { seen.add(d.key); out.push(d); } });
+  return out;
+}
+const matDef = key => matDefs().find(d => d.key === key) || null;
+function matInfo(key) {
+  const d = matDef(key); if (!d) return null;
+  const job = (P.mat || {})[key], mine = (store.matBook || {})[key];
+  const meta = job || mine || {};
+  const price = d.rate ? +(P.rates || normRates(P.rates))[d.rate] : job && job.price != null ? +job.price : mine && mine.price != null ? +mine.price : +d.price || 0;
+  return { def: d, price, vendor: meta.vendor || '', phone: meta.phone || '', date: meta.date || '', note: meta.note || '', src: job ? 'job' : mine ? 'mine' : 'start' };
+}
+const matPrice = key => { const m = matInfo(key); return m ? m.price : 0; };
+function setMatPrice(key, data, forNewJobs) {
+  const d = matDef(key); if (!d) return;
+  const rec = { price: Math.max(0, +data.price || 0), vendor: data.vendor || '', phone: data.phone || '', date: data.date || '', note: data.note || '' };
+  P.mat = P.mat || {}; P.mat[key] = rec; P.rates = normRates(P.rates);
+  if (d.rate) P.rates[d.rate] = rec.price;
+  if (!MAT_BUILTIN.some(b => b.key === key)) { P.matDefs = (P.matDefs || []).filter(x => x.key !== key).concat([{ key, name: d.name, unit: d.unit }]); }
+  if (forNewJobs) {
+    store.matBook = store.matBook || {}; store.matBook[key] = Object.assign({}, rec);
+    if (d.rate) { store.rates = store.rates && store.rates.v === RATES_V ? store.rates : { v: RATES_V }; store.rates[d.rate] = rec.price; }
+    if (!MAT_BUILTIN.some(b => b.key === key)) store.matDefs = (store.matDefs || []).filter(x => x.key !== key).concat([{ key, name: d.name, unit: d.unit }]);
+  }
+  calcCache.clear(); save(true);
+}
+const matTxt = (m, d) => `$${num(m.price, m.price < 10 ? 2 : 2)} / ${d.unit}`;
+function matUsedOn(key) {
+  const E = estimate(), out = [];
+  E.rows.forEach(r => { if (r.matRef && r.matRef.mk === key && r.qty > 0) out.push(`${r.desc} (${num(r.qty, r.unit === 'TON' ? 1 : 0)} ${r.unit})`); });
+  return out;
+}
+function openMatBook(after) {
+  const card = $('#modalCard'); card.classList.remove('wide');
+  const defs = matDefs();
+  const row = d => { const m = matInfo(d.key), used = matUsedOn(d.key); return `<button class="item" data-mat="${esc(d.key)}"><div class="t"><b>${esc(d.name)}</b><small>${m.vendor ? esc(m.vendor) + (m.date ? ' · quoted ' + esc(m.date) : '') : m.src === 'start' ? 'starting price — tap to enter your quote' : m.src === 'mine' ? 'your saved price' : 'price for this job'}${used.length ? ' · on this job' : ''}</small></div><span class="mprice">${matTxt(m, d)}</span>›</button>`; };
+  card.innerHTML = `<div class="row" style="margin-bottom:6px;align-items:center"><h2 style="margin:0">Material prices</h2><button class="sec" id="mbDone" style="flex:0 0 auto">Done</button></div>
+    <p class="muted" style="margin:0 0 10px">Enter quotes as you get them — supplier or trucking company, price, date. The estimate updates right away.</p>
+    <button class="pri big" id="mbAdd" style="width:100%">＋ Add material</button>
+    <div class="list mt">${defs.map(row).join('')}</div>`;
+  $('#modal').classList.remove('hidden'); card.scrollTop = 0; $('#modal').scrollTop = 0;
+  $('#mbDone').onclick = () => { $('#modal').classList.add('hidden'); render(); if (after) after(); };
+  $('#mbAdd').onclick = () => matEditor(null, after);
+  card.querySelectorAll('[data-mat]').forEach(b => b.onclick = () => matEditor(b.dataset.mat, after));
+}
+function matEditor(key, after, backToList = true) {
+  const isNew = !key, d = isNew ? { key: 'm' + uid(), name: '', unit: 'CY', price: 0 } : matDef(key);
+  const m = isNew ? { price: '', vendor: '', phone: '', date: '', note: '' } : matInfo(key);
+  const used = isNew ? [] : matUsedOn(key);
+  const today = new Date().toISOString().slice(0, 10);
+  const card = $('#modalCard'); card.classList.remove('wide');
+  card.innerHTML = `<h2 style="margin:0 0 4px">${isNew ? 'Add material' : esc(d.name)}</h2>
+    ${d.hint ? `<div class="muted">${esc(d.hint)}</div>` : ''}
+    ${isNew ? `<label for="mtName">Material</label><input id="mtName" placeholder="e.g. 4&quot; perforated drain pipe" autocomplete="off">
+      <label for="mtUnit">Priced per</label><select id="mtUnit">${['CY', 'TON', 'LF', 'SF', 'SY', 'EA', 'LOAD', 'HR', 'LS', 'BAG', 'GAL'].map(u => `<option ${u === 'CY' ? 'selected' : ''}>${u}</option>`).join('')}</select>` : ''}
+    <label for="mtPrice">Price $ per ${isNew ? '<span id="mtU">CY</span>' : esc(d.unit)}</label>
+    <input id="mtPrice" type="number" inputmode="decimal" step="any" min="0" value="${m.price === '' ? '' : +(+m.price).toFixed(2)}">
+    <label for="mtVendor">Supplier / trucking company</label><input id="mtVendor" value="${esc(m.vendor)}" placeholder="e.g. Smith Trucking" autocomplete="organization">
+    <div class="grid2"><div><label for="mtPhone">Phone</label><input id="mtPhone" type="tel" value="${esc(m.phone)}"></div><div><label for="mtDate">Quote date</label><input id="mtDate" type="date" value="${esc(m.date || today)}"></div></div>
+    <label for="mtNote">Notes</label><input id="mtNote" value="${esc(m.note)}" placeholder="e.g. 18 CY tri-axle, $450 a load">
+    <label class="xrow" style="margin-top:12px"><input type="checkbox" id="mtAll" checked><span><b>Use this price on new jobs too</b><small>Unchecked = this job only</small></span></label>
+    ${used.length ? `<div class="muted mt">On this job: ${esc(used.join('; '))}</div>` : ''}
+    <div class="row" style="margin-top:16px"><button class="sec" id="mtCancel" type="button">Cancel</button><button class="pri" id="mtSave" type="button">Save price</button></div>`;
+  $('#modal').classList.remove('hidden'); card.scrollTop = 0; $('#modal').scrollTop = 0;
+  if (isNew) { $('#mtUnit').onchange = e => { $('#mtU').textContent = e.target.value; }; setTimeout(() => { const x = $('#mtName'); if (x) x.focus(); }, 60); } else setTimeout(() => { const x = $('#mtPrice'); if (x) x.select(); }, 60);
+  const back = () => { if (backToList) openMatBook(after); else { $('#modal').classList.add('hidden'); render(); if (after) after(); } };
+  $('#mtCancel').onclick = back;
+  $('#mtSave').onclick = () => {
+    const price = parseFloat($('#mtPrice').value);
+    if (!isFinite(price) || price < 0) { toast('Type the price'); $('#mtPrice').focus(); return; }
+    if (isNew) {
+      const name = $('#mtName').value.trim(); if (!name) { toast('Name the material'); $('#mtName').focus(); return; }
+      d.name = name; d.unit = $('#mtUnit').value;
+      P.matDefs = (P.matDefs || []).concat([{ key: d.key, name: d.name, unit: d.unit }]);
+    }
+    setMatPrice(d.key, { price, vendor: $('#mtVendor').value.trim(), phone: $('#mtPhone').value.trim(), date: $('#mtDate').value, note: $('#mtNote').value.trim() }, $('#mtAll').checked);
+    toast(`${d.name}: $${num(price, 2)} / ${d.unit} saved`);
+    back();
+  };
+}
+
+// ======================================================================
 // Equipment: pick what's on this job (check boxes) and edit the saved list
 // ======================================================================
 function closeEquipMenu() { const x = document.getElementById('equipMenu'); if (x) x.remove(); document.removeEventListener('pointerdown', equipMenuOutside, true); }
@@ -2283,7 +2535,7 @@ function openEquipMenu(anchor) {
   const rateTxt = e => `$${num(e.hour)}/hr · $${num(e.day)}/day · $${num(e.week)}/wk`;
   box.innerHTML = `<div class="eqhead"><b>Equipment for this job</b><small>Checked machines are used and priced on this takeoff.</small></div>
     <div class="eqlist">${list.map(e => `<label class="eqrow"><input type="checkbox" data-eon="${esc(e.id)}" ${equipOn(e) ? 'checked' : ''}><span><b>${esc(e.name)}</b><small>${rateTxt(e)}${e.rented ? '' : ' · owned'}</small></span></label>`).join('')}</div>
-    <div class="row" style="padding:8px"><button class="sec" id="eqEdit">Edit list…</button><button class="pri" id="eqDone">Done</button></div>`;
+    <div class="row" style="padding:8px"><button class="sec" id="eqEdit">Edit / add equipment</button><button class="pri" id="eqDone">Done</button></div>`;
   document.body.appendChild(box);
   const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
   let top = r.bottom + 6; const maxH = window.innerHeight - top - 12;
@@ -2301,42 +2553,114 @@ function openEquipMenu(anchor) {
   setTimeout(() => document.addEventListener('pointerdown', equipMenuOutside, true), 0);
 }
 function updateEquipBadge() { const b = document.getElementById('eqCount'); if (b) b.textContent = equipList().filter(equipOn).length; }
-function equipEditor() {
-  const work = clone(equipList());
-  const card = $('#modalCard'); card.classList.add('wide');
-  const draw = () => {
-    card.innerHTML = `<div class="row" style="margin-bottom:6px"><h2 style="margin:0">Equipment list</h2><button class="sec" id="qeClose" style="flex:0 0 auto">Cancel</button></div>
-      <p class="muted" style="margin:0 0 8px">Saved on this phone and used for every takeoff. “On new jobs” sets which boxes start checked. “Used for” tells the app which work a machine can do; “Speed %” is its production compared with the main machine for that work.</p>
-      <div class="sheetwrap" role="region" aria-label="Equipment list editor" tabindex="0"><table class="sheet eqedit">
-        <thead><tr><th scope="col">Equipment</th><th scope="col">$/hour</th><th scope="col">$/day</th><th scope="col">$/week</th><th scope="col">Gal/hr</th><th scope="col">Delivery each way</th><th scope="col">Speed %</th><th scope="col">Used for</th><th scope="col">Rented</th><th scope="col">On new jobs</th><th scope="col"><span class="sr">Remove</span></th></tr></thead>
-        <tbody>${work.map((e, i) => `<tr>
-          <th scope="row"><input class="cin nm" data-i="${i}" data-k="name" value="${esc(e.name)}" aria-label="Equipment name"></th>
-          ${['hour', 'day', 'week', 'burn', 'deliver', 'speed'].map(k => `<td><input class="cin" type="number" inputmode="decimal" step="any" data-i="${i}" data-k="${k}" value="${e[k] == null ? '' : e[k]}" aria-label="${esc(e.name)} ${k}"></td>`).join('')}
-          <td class="roles">${['dig', 'grade', 'trench', 'support'].map(r => `<label title="${ROLE_LABEL[r]}"><input type="checkbox" data-i="${i}" data-role="${r}" ${(e.roles || []).includes(r) ? 'checked' : ''}>${{ dig: 'Dig', grade: 'Grade', trench: 'Trench', support: 'Support' }[r]}</label>`).join('')}</td>
-          <td><input type="checkbox" data-i="${i}" data-b="rented" ${e.rented ? 'checked' : ''} aria-label="${esc(e.name)} is rented"></td>
-          <td><input type="checkbox" data-i="${i}" data-b="on" ${e.on ? 'checked' : ''} aria-label="${esc(e.name)} on new jobs"></td>
-          <td><button class="dng" data-del="${i}" style="padding:4px 8px" aria-label="Remove ${esc(e.name)}">✕</button></td></tr>`).join('')}</tbody></table></div>
-      <div class="row mt"><button class="sec" id="qeAdd">+ Add equipment</button><button class="sec" id="qeReset">Reset to starting list</button></div>
-      <div class="row mt"><button class="pri" id="qeSave">Save list</button></div>
-      <div class="muted mt">Day and week rates are from north Georgia rental yards (Nov 2026). Hourly rates are starting estimates. Owned equipment (truck, trailers) gets no rental waiver or tax. Set delivery to 0 for machines you haul yourself.</div>`;
-    card.querySelectorAll('[data-k]').forEach(inp => inp.onchange = () => { const e = work[+inp.dataset.i]; e[inp.dataset.k] = inp.dataset.k === 'name' ? inp.value : (parseFloat(inp.value) || 0); });
-    card.querySelectorAll('[data-role]').forEach(c => c.onchange = () => { const e = work[+c.dataset.i]; e.roles = (e.roles || []).filter(r => r !== c.dataset.role); if (c.checked) e.roles.push(c.dataset.role); });
-    card.querySelectorAll('[data-b]').forEach(c => c.onchange = () => { work[+c.dataset.i][c.dataset.b] = c.checked; });
-    card.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { work.splice(+b.dataset.del, 1); draw(); });
-    $('#qeAdd').onclick = () => { work.push({ id: 'eq' + uid(), name: 'New equipment', hour: 0, day: 0, week: 0, burn: 0, deliver: 0, rented: true, on: false, roles: ['support'], speed: 100 }); draw(); const ins = card.querySelectorAll('input.nm'); const last = ins[ins.length - 1]; if (last) { last.focus(); last.select(); } };
-    $('#qeReset').onclick = () => { work.splice(0, work.length, ...clone(DEFAULT_EQUIP)); draw(); };
-    $('#qeClose').onclick = () => { $('#modal').classList.add('hidden'); card.classList.remove('wide'); };
-    $('#qeSave').onclick = () => {
-      const bad = work.find(e => !String(e.name || '').trim());
-      if (bad) { toast('Every machine needs a name'); return; }
-      store.equipList = work; calcCache.clear(); save(true);
-      $('#modal').classList.add('hidden'); card.classList.remove('wide');
-      updateEquipBadge(); render(); toast('Equipment list saved for future takeoffs');
+// Equipment list as a small file you can text or email to anyone using SiteWalk
+function equipFromFile(text) {
+  let o; try { o = JSON.parse(text); } catch (e) { return null; }
+  const list = Array.isArray(o) ? o : o && o.sitewalk === 'equipment' && Array.isArray(o.list) ? o.list : null;
+  if (!list || !list.length) return null;
+  const n = v => { const x = parseFloat(v); return isFinite(x) && x >= 0 ? x : 0; };
+  const out = list.filter(e => e && String(e.name || '').trim()).map(e => ({
+    id: String(e.id || 'eq' + uid()).slice(0, 40), name: String(e.name).trim().slice(0, 80),
+    hour: n(e.hour), day: n(e.day), week: n(e.week), burn: n(e.burn), deliver: n(e.deliver), speed: n(e.speed) || 100,
+    rented: !!e.rented, delivOnce: !!e.delivOnce, on: !!e.on, roles: (Array.isArray(e.roles) ? e.roles : []).filter(r => ['dig', 'grade', 'trench', 'support'].includes(r))
+  }));
+  return out.length ? { list: out, by: o && o.by ? String(o.by).slice(0, 80) : '', saved: o && o.saved ? String(o.saved).slice(0, 40) : '' } : null;
+}
+// Equipment editor: a list of your machines — tap one to edit it, or add a new one.
+// Changes save as you go. A list loaded from a file is shown first and only used after "Use this list".
+const ROLE_SHORT = { dig: 'Dig & clear', grade: 'Grade & spread', trench: 'Trench', support: 'Truck / trailer' };
+function equipEditor(preload) {
+  const pending = !!preload, work = clone(preload ? preload.list : equipList());
+  const card = $('#modalCard'); card.classList.remove('wide');
+  const close = () => { $('#modal').classList.add('hidden'); updateEquipBadge(); render(); };
+  const commit = () => { if (pending) return; store.equipList = work; store.equipV = EQUIP_V; calcCache.clear(); save(true); };
+  const rateTxt = e => `$${num(e.hour)}/hr · $${num(e.day)}/day · $${num(e.week)}/wk · ${e.rented ? 'rented' : 'owned'}${+e.deliver ? ` · delivery $${num(e.deliver)}${e.delivOnce ? ' round trip' : ' each way'}` : ''}`;
+  const showList = () => {
+    card.innerHTML = `<div class="row" style="margin-bottom:6px;align-items:center"><h2 style="margin:0">${pending ? 'Loaded equipment list' : 'Edit equipment'}</h2>${pending ? '' : '<button class="sec" id="qeDone" style="flex:0 0 auto">Done</button>'}</div>
+      ${pending ? `<div class="warn">${work.length} machines${preload.by ? ' from ' + esc(preload.by) : ''}${preload.saved ? ' (' + esc(preload.saved) + ')' : ''}. Look them over, then tap <b>Use this list</b>. It replaces your current list.</div>`
+        : '<p class="muted" style="margin:0 0 10px">Tap a machine to change its name, rates or what it’s used for. Changes are saved on this phone for every takeoff.</p>'}
+      ${pending ? '' : '<button class="pri big" id="qeAdd" style="width:100%">＋ Add new equipment</button>'}
+      <div class="list mt">${work.map((e, i) => `<button class="item" data-eq="${i}"><div class="sw" style="background:${e.rented ? '#1a73e8' : '#188038'};border-radius:50%"></div><div class="t"><b>${esc(e.name)}</b><small>${rateTxt(e)}${(e.roles || []).length ? ' · ' + e.roles.map(r => ROLE_SHORT[r]).join(', ') : ''}</small></div>${pending ? '' : '›'}</button>`).join('') || '<div class="muted">No equipment yet. Tap Add new equipment.</div>'}</div>
+      ${pending ? `<div class="row mt"><button class="sec" id="qeCancel">Cancel</button><button class="pri" id="qeUse">Use this list</button></div>`
+        : `<div class="row mt"><button class="sec" id="qeShare">📤 Share list</button><button class="sec" id="qeLoad">📥 Load list…</button></div>
+           <button class="sec mt" id="qeReset" style="width:100%">Reset to starting list</button>
+           <input type="file" id="qeFile" accept=".txt,.json,text/plain,application/json" class="hidden">`}`;
+    $('#modal').classList.remove('hidden');
+    if (pending) {
+      $('#qeCancel').onclick = close;
+      $('#qeUse').onclick = () => { store.equipList = work; store.equipV = EQUIP_V; calcCache.clear(); save(true); close(); toast(`Equipment list loaded — ${work.length} machines`); };
+      return;
+    }
+    $('#qeDone').onclick = close;
+    $('#qeAdd').onclick = () => editMachine(-1);
+    card.querySelectorAll('[data-eq]').forEach(b => b.onclick = () => editMachine(+b.dataset.eq));
+    $('#qeReset').onclick = async () => {
+      if (!(await confirmBox('Reset to the starting equipment list? Your changes and added machines will be replaced.', 'Reset'))) { showList(); return; }
+      work.splice(0, work.length, ...clone(DEFAULT_EQUIP)); commit(); showList(); toast('Equipment list reset');
+    };
+    $('#qeShare').onclick = async () => {
+      const by = (store.company && store.company.name) || '';
+      const blob = new Blob([JSON.stringify({ sitewalk: 'equipment', v: EQUIP_V, by, saved: new Date().toISOString().slice(0, 10), list: work }, null, 1)], { type: 'text/plain' });
+      const r = await deliverFiles([{ name: 'SiteWalk_equipment_list.txt', blob }], 'share', { email: '', subject: 'SiteWalk equipment list',
+        body: `Equipment list for SiteWalk (${work.length} machines${by ? ', from ' + by : ''}).\n\nTo load it: save this file, then in SiteWalk tap Equipment → Edit equipment → Load list… and pick the file, then tap Use this list.` });
+      toast(r === 'shared' ? 'Equipment list shared' : r === 'cancel' ? 'Cancelled' : 'Saved SiteWalk_equipment_list.txt — send it to anyone using SiteWalk', 3500);
+    };
+    $('#qeLoad').onclick = () => $('#qeFile').click();
+    $('#qeFile').onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      const got = equipFromFile(await f.text());
+      if (!got) { toast('That file isn’t a SiteWalk equipment list', 3500); return; }
+      equipEditor(got);
     };
   };
-  draw();
-  $('#modal').classList.remove('hidden');
+  const editMachine = i => {
+    const isNew = i < 0;
+    const e = isNew ? { id: 'eq' + uid(), name: '', hour: 0, day: 0, week: 0, burn: 0, deliver: 0, rented: false, on: true, roles: ['dig'], speed: 100 } : clone(work[i]);
+    let rented = !!e.rented, roles = new Set(e.roles || []), armDel = false, once = !!e.delivOnce;
+    const nf = (k, l, step, help) => `<div><label for="m_${k}">${l}</label><input id="m_${k}" type="number" inputmode="decimal" step="${step || 'any'}" min="0" value="${e[k] == null ? '' : e[k]}">${help ? `<div class="muted" style="margin-top:3px;font-size:12px">${help}</div>` : ''}</div>`;
+    card.innerHTML = `<h2 style="margin:0 0 4px">${isNew ? 'Add new equipment' : 'Edit equipment'}</h2>
+      <label for="m_name">Name</label><input id="m_name" value="${esc(e.name)}" placeholder="e.g. Kubota KX-040 Mini excavator" autocomplete="off">
+      <div class="grid3">${nf('hour', '$ per hour')}${nf('day', '$ per day')}${nf('week', '$ per week')}</div>
+      <label id="m_ownL">Owned or rented</label>
+      <div class="seg" role="radiogroup" aria-labelledby="m_ownL"><button type="button" role="radio" data-own="0">Owned</button><button type="button" role="radio" data-own="1">Rented</button></div>
+      <div class="muted" id="m_ownH" style="margin-top:4px;font-size:12px"></div>
+      <div class="grid2">${nf('deliver', 'Delivery & pickup $', 'any')}${nf('burn', 'Fuel, gal per hour', '0.1')}</div>
+      <div class="seg" role="radiogroup" aria-label="How the delivery charge is counted" style="margin-top:6px"><button type="button" role="radio" data-dm="0">Each way (× 2)</button><button type="button" role="radio" data-dm="1">One time, round trip</button></div>
+      <label id="m_roleL">Used for</label>
+      <div class="rolechips" role="group" aria-labelledby="m_roleL">${Object.entries(ROLE_SHORT).map(([r, l]) => `<label class="rchip"><input type="checkbox" data-r="${r}" ${roles.has(r) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      <div class="grid2">${nf('speed', 'Speed %', '5', '100 = your main machine for that work. A mini on grading might be 45.')}</div>
+      <label class="xrow" style="margin-top:10px"><input type="checkbox" id="m_on" ${e.on ? 'checked' : ''}><span><b>Check it on new jobs</b><small>Starts checked in the Equipment list</small></span></label>
+      ${isNew ? `<label class="xrow" style="margin-top:6px"><input type="checkbox" id="m_job" checked><span><b>Use it on this job</b><small>${esc(P.name)}</small></span></label>` : ''}
+      <div class="row" style="margin-top:16px">${isNew ? '' : '<button class="dng" id="m_del" type="button" style="flex:0 0 auto">Delete</button>'}<button class="sec" id="m_cancel" type="button">Cancel</button><button class="pri" id="m_save" type="button">${isNew ? 'Add' : 'Save'}</button></div>`;
+    const own = () => { card.querySelectorAll('[data-own]').forEach(b => { const on = (b.dataset.own === '1') === rented; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+      $('#m_ownH').textContent = rented ? 'Rented: day/week rates with a 1-day minimum, plus rental waiver & tax and delivery.' : 'Owned: can be billed by the hour; no waiver or tax. Delivery is optional — use it for a mobilization charge.'; };
+    own();
+    card.querySelectorAll('[data-own]').forEach(b => b.onclick = () => { rented = b.dataset.own === '1'; own(); });
+    const dm = () => card.querySelectorAll('[data-dm]').forEach(b => { const on = (b.dataset.dm === '1') === once; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+    dm(); card.querySelectorAll('[data-dm]').forEach(b => b.onclick = () => { once = b.dataset.dm === '1'; dm(); });
+    card.querySelectorAll('[data-r]').forEach(c => c.onchange = () => { if (c.checked) roles.add(c.dataset.r); else roles.delete(c.dataset.r); });
+    if (isNew) setTimeout(() => $('#m_name').focus(), 60);
+    $('#m_cancel').onclick = showList;
+    $('#m_save').onclick = () => {
+      const name = $('#m_name').value.trim();
+      if (!name) { toast('Give the machine a name'); $('#m_name').focus(); return; }
+      if (!roles.size) { toast('Pick at least one thing it’s used for'); return; }
+      const v = k => { const x = parseFloat($('#m_' + k).value); return isFinite(x) && x >= 0 ? x : 0; };
+      Object.assign(e, { name, hour: v('hour'), day: v('day'), week: v('week'), deliver: v('deliver'), burn: v('burn'), speed: v('speed') || 100, rented, delivOnce: once, roles: [...roles], on: $('#m_on').checked });
+      if (isNew) { work.push(e); if ($('#m_job').checked) { P.equipOn = P.equipOn || {}; P.equipOn[e.id] = true; } }
+      else work[i] = e;
+      commit(); showList(); toast(isNew ? `${name} added` : `${name} saved`);
+    };
+    if (!isNew) $('#m_del').onclick = () => {
+      if (!armDel) { armDel = true; $('#m_del').textContent = 'Tap again to delete'; return; }
+      const gone = work.splice(i, 1)[0]; commit();
+      (P.lines || []).filter(Ln => Ln.equip === gone.id).forEach(Ln => { const pk = Ln.role ? pickMachine(Ln.role) : null; Ln.equip = pk && pk.e ? pk.e.id : ''; });
+      save(); showList(); toast(`${gone.name} deleted`);
+    };
+  };
+  showList();
 }
+
 // ======================================================================
 
 // ======================================================================
@@ -2372,16 +2696,20 @@ const DEFAULT_ITEMS = [
   { id: 'pad', name: 'Building pad', calc: 'pad', sec: 'earth', role: 'grade', equip: 'dozer', prod: 25, mat: 0, loads: 0, params: PAD_PARAMS },
   { id: 'grade', name: 'Grade area to elevation', calc: 'grade', sec: 'earth', role: 'grade', equip: 'dozer', prod: 25, mat: 0, loads: 0, params: { elev: null, balance: true, design: 'flat', sectionIn: 0, stripIn: 0, slopePct: 1, slopeDir: 0 } },
   { id: 'trench', name: 'Dig utility trench & backfill', calc: 'lf', sec: 'util', role: 'trench', equip: 'trencher', prod: 100, mat: 0, loads: 0, params: { purpose: 'Water line', depthIn: 24 } },
-  { id: 'stone', name: 'Driveway stone — crusher run', calc: 'stone', sec: 'stone', role: 'grade', equip: 'dozer', prod: 25, mat: 32, loads: 0, params: { widthFt: 12, depthIn: 6, density: 1.5, compactPct: 15, fabric: false } },
+  { id: 'stone', name: 'Driveway stone — crusher run', calc: 'stone', sec: 'stone', role: 'grade', equip: 'dozer', prod: 25, mat: 32, matKey: 'stone', loads: 0, params: { widthFt: 12, depthIn: 6, density: 1.5, compactPct: 15, fabric: false } },
   { id: 'strip', name: 'Strip & stockpile topsoil', calc: 'cyDepth', sec: 'top', role: 'grade', equip: 'dozer', prod: 40, mat: 0, loads: 0, params: { depthIn: 6 } },
   { id: 'respread', name: 'Respread topsoil & fine grade', calc: 'cyDepth', sec: 'top', role: 'grade', equip: 'dozer', prod: 30, mat: 0, loads: 0, params: { depthIn: 4 } },
   { id: 'seed', name: 'Seed, fertilize, lime & straw — by hand', calc: 'msf', sec: 'grass', role: null, equip: '', prod: 2, mat: null, loads: 0 },
-  { id: 'silt', name: 'Silt fence', calc: 'lf', sec: 'grass', role: null, equip: '', prod: 60, mat: 1.10, loads: 0 },
+  { id: 'silt', name: 'Silt fence', calc: 'lf', sec: 'grass', role: null, equip: '', prod: 60, mat: 1.10, matKey: 'silt', loads: 0 },
   { id: 'plant', name: 'Plant tree', calc: 'count', sec: 'other', role: 'dig', equip: 'mini', prod: 1, mat: 250, loads: 0 },
   { id: 'hours', name: 'Extra work — by the hour', calc: 'hrs', sec: 'other', role: 'dig', equip: 'mini', prod: 1, mat: 0, loads: 0 },
   { id: 'allow', name: 'Allowance / lump sum', calc: 'ls', sec: 'other', role: null, equip: '', prod: 0, mat: 0, loads: 0 }
 ];
-function itemLib() { if (!Array.isArray(store.items) || !store.items.length) store.items = clone(DEFAULT_ITEMS); return store.items; }
+function itemLib() {
+  if (!Array.isArray(store.items) || !store.items.length) store.items = clone(DEFAULT_ITEMS);
+  store.items.forEach(i => { if (i.matKey === undefined) { const d = DEFAULT_ITEMS.find(x => x.id === i.id); i.matKey = d && d.matKey && i.mat === d.mat ? d.matKey : null; } });
+  return store.items;
+}
 const libById = id => itemLib().find(i => i.id === id) || DEFAULT_ITEMS.find(i => i.id === id) || null;
 const lineNo = L => P.lines.indexOf(L) + 1;
 const lineColor = L => LINE_COLORS[(P.lines.indexOf(L) + LINE_COLORS.length) % LINE_COLORS.length];
@@ -2391,7 +2719,7 @@ function newLine(item) {
     const pref = equip ? eqById(equip) : null;
     if (!pref || !equipOn(pref)) { const pk = pickMachine(item.role); if (pk.e && !pk.missing) { prod = prod * (pk.e.speed || 100) / ((pref && pref.speed) || 100); equip = pk.e.id; } }
   }
-  return { id: uid(), item: item.id, desc: item.name, calc: item.calc, sec: item.sec || 'other', role: item.role || null, equip, prod, mat: item.mat, loads: item.loads || 0, params: clone(item.params || {}), shapes: [], typed: null };
+  return { id: uid(), item: item.id, desc: item.name, calc: item.calc, sec: item.sec || 'other', role: item.role || null, equip, prod, mat: item.mat, matKey: item.matKey || null, loads: item.loads || 0, params: clone(item.params || {}), shapes: [], typed: null };
 }
 function pseudoArea(L) {
   const poly = (L.shapes || []).find(s => s.geom === 'poly'); if (!poly) return null;
@@ -2544,7 +2872,7 @@ function takeoffHtml() {
     const q = lineQty(Ln), r = E.byLine[Ln.id], eq = Ln.equip ? eqById(Ln.equip) : null;
     const need = !q.measured && Ln.typed == null && CALC[Ln.calc].geom;
     const qtyTxt = need ? 'Not laid out yet' : q.why ? q.why : `${num(q.qty, q.unit === 'AC' || q.unit === 'MSF' ? 2 : q.unit === 'TON' ? 1 : 0)} ${q.unit}`;
-    const price = r ? r.total * (1 + P.rates.ohPct / 100) * (1 + P.rates.profitPct / 100) : 0;
+    const price = r ? r.total * (E.direct ? E.total / E.direct : 1) : 0;
     return `<div class="tline${need || q.why ? ' need' : ''}">
       <button class="tl-main" data-line="${Ln.id}"><span class="tnum" style="background:${lineColor(Ln)}">${i + 1}</span><span class="t"><b>${esc(Ln.desc)}</b><small>${esc(qtyTxt)} · ${esc(eq ? eq.name : (Ln.prod ? 'by hand' : 'material'))}${r ? ' · ' + money(price) : ''}</small></span></button>
       ${CALC[Ln.calc].geom ? `<button class="sec tl-meas" data-meas="${Ln.id}" aria-label="Lay out line ${i + 1} on the map">📏</button>` : ''}</div>`;
@@ -2567,8 +2895,9 @@ function takeoffHtml() {
       <button class="pri big mt" id="niGo" style="width:100%">📏 Lay it out on the map</button>
     </div>
   </section>
+  ${P.lines.length ? '<button class="pri big mt office" id="tkOffice" style="width:100%">📤 Send to office</button>' : ''}
   <div class="row mt"><button class="sec" id="tkAdd">Pick from my list</button>${P.lines.length ? `<button class="sec" id="tkEst">Estimate · ${money(E.total)}</button>` : ''}</div>
-  ${P.lines.length ? '<button class="sec mt" id="tkPlan" style="width:100%">📐 Drawing</button>' : ''}`;
+  <div class="row mt">${P.lines.length ? '<button class="sec" id="tkPlan">📐 Drawing</button>' : ''}<button class="sec" id="tkMat">📋 Material prices</button></div>`;
 }
 function bindNewItem(all, on) {
   if (!$('#niDesc')) return;
@@ -2611,30 +2940,36 @@ function bindNewItem(all, on) {
 function showItemResult(Ln) {
   ui.lineId = null; setTab('takeoff');
   const E = estimate(), b = E.byLine[Ln.id] || { hrs: 0, labor: 0, equip: 0, fuel: 0, matT: 0, total: 0 }, q = lineQty(Ln), R = P.rates;
-  const oh = b.total * R.ohPct / 100, pr = (b.total + oh) * R.profitPct / 100, eq = Ln.equip ? eqById(Ln.equip) : null;
+  const share = E.direct ? b.total / E.direct : 0, oh = E.oh * share, pr = E.profit * share, eq = Ln.equip ? eqById(Ln.equip) : null;
   const rent = eq ? E.rentals.find(x => x.k === eq.id) : null;
   const unitTxt = q.unit === 'MSF' ? '1,000 SF' : q.unit;
   const card = $('#modalCard'); card.classList.remove('wide');
   card.innerHTML = `<div class="resh"><span class="tnum big" style="background:${lineColor(Ln)}">${lineNo(Ln)}</span><div><h2 style="margin:0">${esc(Ln.desc)}</h2><div class="muted">Laid out on the map and added to the takeoff</div></div></div>
-    ${q.why ? `<div class="warn mt">${esc(q.why)}. Open Edit details to finish it.</div>` : `<div class="qtybig"><b>${num(q.qty, q.unit === 'AC' || q.unit === 'MSF' ? 2 : q.unit === 'TON' ? 1 : 0)}</b> ${esc(unitTxt)}${Ln.calc === 'pad' && q.pad ? ` <small>slab ${num(Ln.params.slabElev, 1)} · pad ${num(q.pad.padElev, 2)}</small>` : ''}</div>`}
+    ${q.why ? `<div class="warn mt">${esc(q.why)}. Open Edit details to finish it.</div>` : `<div class="qtybig"><b>${num(q.qty, q.unit === 'AC' || q.unit === 'MSF' ? 2 : q.unit === 'TON' ? 1 : 0)}</b> ${esc(unitTxt)}</div>`}
+    ${Ln.calc === 'pad' ? `<div class="slabrow"><div><span>Finish slab</span><b>${Ln.params.slabElev != null ? num(Ln.params.slabElev, 2) + ' ft' : 'not set'}</b>${q.pad ? `<small>pad ${num(q.pad.padElev, 2)} ft · cut ${num(q.pad.cutCY)} CY · fill ${num(q.pad.fillCY)} CY (+${Ln.params.extraPct}% = ${num(q.pad.dirtCY)})</small>` : ''}</div><button class="sec" id="irSlab" type="button">Change</button></div>` : ''}
+    ${Ln.calc === 'pad' && q.pad && q.pad.netCY < -0.5 ? (() => { const mf = matInfo('fill'); return `<div class="slabrow"><div><span>Fill dirt to bring in</span><b>${num(-q.pad.netCY * (1 + P.factors.swellPct / 100))} CY × $${num(mf.price, 2)}</b><small>${mf.vendor ? esc(mf.vendor) + (mf.date ? ' · ' + esc(mf.date) : '') : 'starting price — enter your trucking quote'} · priced on the estimate under Earthwork</small></div><button class="sec" id="irFill" type="button">Enter quote</button></div>`; })() : ''}
     <table class="itemcost"><tbody>
       <tr><th scope="row">Material</th><td>${money(b.matT)}</td></tr>
       <tr><th scope="row">Labor<small>${num(b.hrs, 1)} hrs × $${num(R.operator * (1 + R.burdenPct / 100), 2)}/hr</small></th><td>${money(b.labor)}</td></tr>
       <tr><th scope="row">Equipment<small>${eq ? `${esc(eq.name)}${rent ? ` · ${esc(rent.how)}${rent.rented ? ' + waiver & tax' : ''}` : ''}` : 'by hand'}</small></th><td>${money(b.equip)}</td></tr>
       <tr><th scope="row">Fuel<small>diesel $${num(R.fuel, 2)}/gal</small></th><td>${money(b.fuel)}</td></tr>
       <tr class="sub"><th scope="row">Direct cost</th><td>${money(b.total)}</td></tr>
-      <tr><th scope="row">Overhead ${num(R.ohPct)}%</th><td>${money(oh)}</td></tr>
-      <tr><th scope="row">Profit ${num(R.profitPct)}%</th><td>${money(pr)}</td></tr>
+      <tr><th scope="row">${E.ohTxt}</th><td>${money(oh)}</td></tr>
+      <tr><th scope="row">${E.profitTxt}</th><td>${money(pr)}</td></tr>
       <tr class="tot"><th scope="row">Item price</th><td>${money(b.total + oh + pr)}</td></tr>
     </tbody></table>
     <div class="muted" style="margin-top:6px">Equipment is the rental for the days this item needs, shared with other items on the same machine. Delivery and the truck &amp; trailer are on the estimate under Mobilization.</div>
     <button class="pri big mt" id="irNext" style="width:100%">＋ Next work item</button>
-    <div class="row mt"><button class="sec" id="irEdit">Edit details</button><button class="sec" id="irEst">See estimate</button></div>`;
+    <div class="row mt"><button class="sec" id="irEdit">Edit details</button><button class="sec" id="irEst">See estimate</button></div>
+    <button class="sec mt" id="irOffice" style="width:100%">📤 Send to office</button>`;
   $('#modal').classList.remove('hidden');
   const close = () => $('#modal').classList.add('hidden');
   $('#irNext').onclick = () => { close(); openTakeoffEntry(); setTimeout(() => { const d = $('#niDesc'); if (d) d.scrollIntoView({ block: 'center' }); }, 50); };
   $('#irEdit').onclick = () => { close(); openLine(Ln.id); };
   $('#irEst').onclick = () => { close(); setTab('estimate'); };
+  $('#irOffice').onclick = () => { close(); sendToOffice(); };
+  if ($('#irFill')) $('#irFill').onclick = () => matEditor('fill', () => showItemResult(Ln), false);
+  if ($('#irSlab')) $('#irSlab').onclick = async () => { close(); await askSlab(Ln); showItemResult(Ln); };
 }
 function lineHtml(Ln) {
   const n = lineNo(Ln), q = lineQty(Ln), C = CALC[Ln.calc] || CALC.ls, p = Ln.params || {};
@@ -2646,13 +2981,15 @@ function lineHtml(Ln) {
   let special = '';
   if (Ln.calc === 'pad') {
     const v = q.pad, padEl = p.slabElev != null ? p.slabElev - ((p.slabIn || 0) + (p.stoneIn || 0)) / 12 : null;
-    special = `${v ? `<div class="stats"><div class="stat cut"><b>${num(v.cutCY)}</b><span>Cut CY</span></div><div class="stat fill"><b>${num(v.fillCY)}</b><span>Fill CY</span></div><div class="stat fill"><b>${num(v.dirtCY)}</b><span>Dirt +${p.extraPct}%</span></div>
+    special = `      <section class="slabbox"><label for="lp_slabElev">Finish slab elevation, ft</label>
+      <div class="row"><input id="lp_slabElev" type="number" inputmode="decimal" step="0.01" data-lp="slabElev" value="${p.slabElev == null ? '' : p.slabElev}" placeholder="e.g. 421.5">${P.surface && (Ln.shapes || []).length ? '<button class="sec" id="lnBal" style="flex:0 0 auto">Balance</button>' : ''}</div>
+      <div class="muted" style="margin-top:4px">${padEl != null ? `Pad top = slab − ${num((p.slabIn || 0) + (p.stoneIn || 0))}" = <b>${num(padEl, 2)} ft</b>. ` : ''}${p.slabElev == null ? 'Type the finished floor elevation so the app can figure the cut and fill.' : 'Change it any time — cut and fill update right away.'}</div>
+      <button class="sec" id="lnSlab" style="width:100%;margin-top:8px">Ground elevations &amp; suggestions…</button></section>
+${v ? `<div class="stats"><div class="stat cut"><b>${num(v.cutCY)}</b><span>Cut CY</span></div><div class="stat fill"><b>${num(v.fillCY)}</b><span>Fill CY</span></div><div class="stat fill"><b>${num(v.dirtCY)}</b><span>Dirt +${p.extraPct}%</span></div>
       <div class="stat"><b>${Math.abs(v.netCY) < 0.5 ? '0' : num(Math.abs(v.netCY))}</b><span>${Math.abs(v.netCY) < 0.5 ? 'Balanced' : v.netCY > 0 ? 'Extra dirt' : 'Import CY'}</span></div><div class="stat"><b>${num(v.padElev, 2)}</b><span>Pad elev</span></div><div class="stat"><b>${num(v.reach)}</b><span>Slopes reach ft</span></div></div>
       <div class="legend">Fill <i></i> Cut</div><div class="muted">House ${num(v.footprintArea)} sf · pad ${num(v.padArea)} sf · disturbed ${num(v.disturbedArea)} sf${v.cornerZ.length ? ` · ground at corners ${num(Math.min(...v.cornerZ), 1)}–${num(Math.max(...v.cornerZ), 1)} ft` : ''}</div>
       ${v.needSurface ? '<div class="warn">The side slopes run past the elevation data. <button class="sec" id="lnSurf" style="margin-top:6px;width:100%">Update surface</button></div>' : ''}` : ''}
-      <h3>Slab &amp; pad</h3><label for="lp_slabElev">Slab (finished floor) elevation, ft</label>
-      <div class="row"><input id="lp_slabElev" type="number" inputmode="decimal" step="0.01" data-lp="slabElev" value="${p.slabElev == null ? '' : p.slabElev}" placeholder="e.g. 421.5">${P.surface && (Ln.shapes || []).length ? '<button class="sec" id="lnBal" style="flex:0 0 auto">Balance</button>' : ''}</div>
-      <div class="muted" style="margin-top:4px">${padEl != null ? `Pad top = slab − ${num((p.slabIn || 0) + (p.stoneIn || 0))}" = <b>${num(padEl, 2)} ft</b>. ` : ''}Measure = walk or tap the house corners.</div>
+      <h3>Pad settings</h3>
       <div class="grid2">${fin('offsetFt', 'Pad past house (ft)', p.offsetFt)}${fin('slope', 'Side slope (horiz : 1)', p.slope)}${fin('slabIn', 'Slab (in)', p.slabIn)}${fin('stoneIn', 'Stone under slab (in)', p.stoneIn)}${fin('extraPct', 'Extra dirt for compaction %', p.extraPct)}${fin('stripIn', 'Topsoil stripped first (in)', p.stripIn)}</div>`;
   } else if (Ln.calc === 'grade') {
     const v = q.grade;
@@ -2678,10 +3015,12 @@ function lineHtml(Ln) {
     <div class="grid2">
       ${Ln.calc === 'ls' ? '' : `<div><label for="lnEq">Equipment</label><select id="lnEq" data-lf="equip">${eqOpts}</select></div>`}
       ${['ls', 'hrs'].includes(Ln.calc) ? '' : `<div><label for="lnProd">${Ln.calc === 'pad' || Ln.calc === 'grade' ? 'CY moved per hour' : `${esc(unitTxt)} per hour`}</label><input id="lnProd" type="number" inputmode="decimal" step="any" data-lf="prod" value="${Ln.prod}"></div>`}
-      <div><label for="lnMat">${Ln.calc === 'ls' ? 'Price $' : `Material $ per ${esc(unitTxt)}`}</label><input id="lnMat" type="number" inputmode="decimal" step="any" data-lf="mat" value="${Ln.mat == null ? '' : Ln.mat}" placeholder="${Ln.calc === 'msf' ? 'seed mix from Rates' : '0'}"></div>
+      ${Ln.calc === 'ls' ? '' : `<div class="full"><label for="lnMatK">Material</label><select id="lnMatK" data-lf="matKey"><option value="">${Ln.calc === 'msf' ? 'Seed mix / my own price' : 'None or my own price'}</option>${matDefs().map(d => { const mm = matInfo(d.key); return `<option value="${esc(d.key)}" ${Ln.matKey === d.key ? 'selected' : ''}>${esc(d.name)} — $${num(mm.price, 2)}/${esc(d.unit)}</option>`; }).join('')}</select></div>`}
+      ${Ln.matKey && matDef(Ln.matKey) ? (() => { const mm = matInfo(Ln.matKey), dd = mm.def; return `<div class="full matnote">$${num(mm.price, 2)} per ${esc(dd.unit)}${mm.vendor ? ' · ' + esc(mm.vendor) : ''}${mm.date ? ' · ' + esc(mm.date) : ''}${dd.unit !== q.unit && !(Ln.calc === 'pad' || Ln.calc === 'grade') ? `<br><b>Check:</b> priced per ${esc(dd.unit)} but this item is measured in ${esc(unitTxt)}.` : ''} <button class="sec" id="lnMatEdit" type="button">Enter quote</button></div>`; })()
+        : `<div><label for="lnMat">${Ln.calc === 'ls' ? 'Price $' : `Material $ per ${esc(unitTxt)}`}</label><input id="lnMat" type="number" inputmode="decimal" step="any" data-lf="mat" value="${Ln.mat == null ? '' : Ln.mat}" placeholder="${Ln.calc === 'msf' ? 'seed mix from Rates' : '0'}"></div>`}
       ${Ln.sec === 'clear' ? `<div><label for="lnLoads">Debris truckloads per ${esc(unitTxt)}</label><input id="lnLoads" type="number" inputmode="decimal" step="any" data-lf="loads" value="${Ln.loads || 0}"></div>` : ''}
     </div>
-    ${r ? `<div class="stats mt"><div class="stat"><b>${num(r.hrs, 1)}</b><span>Hours</span></div><div class="stat"><b>${money(r.labor + r.fuel)}</b><span>Labor + fuel</span></div><div class="stat"><b>${money(r.equip)}</b><span>Equipment</span></div><div class="stat"><b>${money(r.matT)}</b><span>Material</span></div><div class="stat"><b>${money(r.total)}</b><span>Line cost</span></div><div class="stat"><b>${money(r.total * (1 + P.rates.ohPct / 100) * (1 + P.rates.profitPct / 100))}</b><span>With OH &amp; profit</span></div></div>` : ''}
+    ${r ? `<div class="stats mt"><div class="stat"><b>${num(r.hrs, 1)}</b><span>Hours</span></div><div class="stat"><b>${money(r.labor + r.fuel)}</b><span>Labor + fuel</span></div><div class="stat"><b>${money(r.equip)}</b><span>Equipment</span></div><div class="stat"><b>${money(r.matT)}</b><span>Material</span></div><div class="stat"><b>${money(r.total)}</b><span>Line cost</span></div><div class="stat"><b>${money(r.total * (E.direct ? E.total / E.direct : 1))}</b><span>With OH &amp; profit</span></div></div>` : ''}
     <div class="row mt"><button class="sec" id="lnLib">Save as my default for “${esc((libById(Ln.item) || {}).name || 'this item')}”</button></div>`;
 }
 function measureLine(Ln, o = {}) {
@@ -2689,21 +3028,69 @@ function measureLine(Ln, o = {}) {
   const go = geom => {
     const n = lineNo(Ln), noun = geom === 'points' ? 'one' : geom === 'line' ? 'point' : 'corner';
     const msg = geom === 'points' ? `#${n} ${Ln.desc}: stand at each one and tap Mark, or tap them on the map` : geom === 'line' ? `#${n} ${Ln.desc}: walk the run — tap Mark at each bend, use Trace, or tap the map` : `#${n} ${Ln.desc}: walk the edge — Mark each corner, use Trace, or tap the map`;
-    startDraw(geom, pts => {
+    startDraw(geom, async pts => {
       if (Ln.calc === 'pad' || Ln.calc === 'grade') Ln.shapes = [];
       Ln.shapes.push({ id: uid(), geom, pts }); Ln.typed = null;
-      if (Ln.calc === 'pad' && Ln.params.slabElev == null && P.surface) { const zs = pts.map(p => G.zAt(P.surface, ...xyOf(p))).filter(z => z != null); if (zs.length) Ln.params.slabElev = Math.ceil((Math.max(...zs) + 0.5) * 2) / 2; }
-      if (Ln.calc === 'grade' && Ln.params.elev == null) { const a = pseudoArea(Ln); if (a) { seedElev(a); Ln.params.elev = a.p.elev; } }
+      calcCache.clear(); save();
+      if (Ln.calc === 'pad') await askSlab(Ln);
+      if (Ln.calc === 'grade') { await ensureSurfaceFor(Ln); if (Ln.params.elev == null) { const a = pseudoArea(Ln); if (a) { seedElev(a); Ln.params.elev = a.p.elev; } } }
       calcCache.clear(); save(); if (o.after) o.after(Ln); else openLine(Ln.id);
-      if (Ln.calc === 'pad' || Ln.calc === 'grade') { const a = pseudoArea(Ln); if (P.surface && a && !G.covers(P.surface, a.pts.map(xyOf))) toast('This runs past the elevation data — tap Update surface', 4500); }
     }, msg, { gps: true, noun, trace: geom !== 'points' });
   };
   if (o.geom) go(o.geom);
   else if (C.geom === 'line|poly') choiceBox('Measure stone', '', [['line', 'Run — centerline × width', 'Driveways and paths'], ['poly', 'Outline', 'Parking pads and odd shapes'], ['cancel', 'Cancel', '']]).then(k => { if (k !== 'cancel') go(k); });
   else go(C.geom);
 }
+// ---- building pad: ask for the finish slab elevation so the cut & fill can be figured
+async function ensureSurfaceFor(Ln) {
+  const a = pseudoArea(Ln); if (!a) return;
+  const xy = a.pts.map(xyOf), ext = (Ln._ext || []).map(xyOf);
+  if (!P.surface || !G.covers(P.surface, xy.concat(ext))) { toast('Getting ground elevations for the pad…', 3000); await buildSurface(); calcCache.clear(); }
+}
+function askSlab(Ln) {
+  return new Promise(async resolve => {
+    await ensureSurfaceFor(Ln);
+    const a = pseudoArea(Ln); if (!a) return resolve(false);
+    const p = Ln.params, xy = a.pts.map(xyOf);
+    const zs = P.surface ? xy.map(([x, y]) => G.zAt(P.surface, x, y)).filter(z => z != null) : [];
+    const lo = zs.length ? Math.min(...zs) : null, hi = zs.length ? Math.max(...zs) : null, avg = zs.length ? zs.reduce((t, z) => t + z, 0) / zs.length : null;
+    const step = ((p.slabIn || 0) + (p.stoneIn || 0)) / 12;
+    let bal = null;
+    if (zs.length) { try { bal = Math.round(G.padBalanceSlab(P.surface, xy, Object.assign({}, a.p, { slabElev: p.slabElev != null ? p.slabElev : avg + step })) * 10) / 10; } catch (e) { bal = null; } }
+    const hiSug = hi != null ? Math.ceil((hi + 0.5) * 2) / 2 : null;
+    const card = $('#modalCard'); card.classList.remove('wide');
+    card.innerHTML = `<h2 style="margin:0 0 4px">Finish slab elevation</h2>
+      <div class="muted">#${lineNo(Ln)} ${esc(Ln.desc)} · ${num(G.polyArea(xy))} sf house</div>
+      ${zs.length ? `<div class="stats"><div class="stat"><b>${num(lo, 1)}</b><span>Ground low</span></div><div class="stat"><b>${num(avg, 1)}</b><span>Average</span></div><div class="stat"><b>${num(hi, 1)}</b><span>Ground high</span></div></div>
+        <div class="muted" style="margin-top:-2px">Ground at the house corners, from USGS elevation data (ft).</div>` : '<div class="warn">No ground elevations here yet, so cut and fill can’t be figured until the elevation data loads (Site tab → Build surface).</div>'}
+      <label for="slabV">Finish slab (finished floor) elevation, ft</label>
+      <input id="slabV" type="number" inputmode="decimal" step="0.01" value="${p.slabElev != null ? p.slabElev : hiSug != null ? hiSug : ''}" placeholder="e.g. 421.5">
+      <div class="muted" id="slabPad" style="margin-top:4px"></div>
+      ${zs.length ? `<div class="row mt"><button class="sec" type="button" data-sv="${hiSug}">High corner + 6": ${num(hiSug, 1)}</button>${bal != null ? `<button class="sec" type="button" data-sv="${bal}">Balance cut &amp; fill: ${num(bal, 1)}</button>` : ''}</div>` : ''}
+      <div class="row" style="margin-top:16px"><button class="sec" id="slabSkip" type="button">Later</button><button class="pri" id="slabOk" type="button">Figure cut &amp; fill</button></div>`;
+    $('#modal').classList.remove('hidden');
+    const inp = $('#slabV'), upd = () => { const v = parseFloat(inp.value); $('#slabPad').innerHTML = isFinite(v) ? `Pad top = slab − ${num((p.slabIn || 0) + (p.stoneIn || 0))}" (${num(p.slabIn)}" slab + ${num(p.stoneIn)}" stone) = <b>${num(v - step, 2)} ft</b>. Pad runs ${num(p.offsetFt)} ft past the house with ${num(p.slope)}:1 slopes.` : ''; };
+    upd(); inp.oninput = upd;
+    card.querySelectorAll('[data-sv]').forEach(b => b.onclick = () => { inp.value = b.dataset.sv; upd(); });
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('#slabOk').click(); } };
+    $('#slabSkip').onclick = () => { $('#modal').classList.add('hidden'); resolve(false); };
+    $('#slabOk').onclick = async () => {
+      const v = parseFloat(inp.value);
+      if (!isFinite(v)) { toast('Type the slab elevation, e.g. 421.5'); inp.focus(); return; }
+      if (lo != null && (v < lo - 40 || v > hi + 40)) { toast(`${num(v, 1)} is far from the ground here (${num(lo, 0)}–${num(hi, 0)} ft) — check it`, 4000); return; }
+      p.slabElev = Math.round(v * 100) / 100; calcCache.clear(); save();
+      $('#modal').classList.add('hidden');
+      const q = lineQty(Ln); if (q.pad && q.pad.needSurface) { await buildSurface(); calcCache.clear(); }
+      resolve(true);
+    };
+    setTimeout(() => { if (document.body.contains(inp)) inp.select(); }, 80);
+  });
+}
 function bindTakeoff(all, on) {
+  on('#lnSlab', async () => { const Ln = P.lines.find(x => x.id === ui.lineId); if (Ln && (Ln.shapes || []).length) { await askSlab(Ln); openLine(Ln.id); } else toast('Lay out the house corners first'); });
   on('#tkAdd', addLineDialog);
+  on('#tkOffice', sendToOffice);
+  on('#tkMat', () => openMatBook());
   bindNewItem(all, on);
   on('#tkEst', () => setTab('estimate'));
   on('#tkPlan', planDialog);
@@ -2711,6 +3098,7 @@ function bindTakeoff(all, on) {
   all('[data-meas]', b => { const Ln = P.lines.find(x => x.id === b.dataset.meas); if (Ln) measureLine(Ln); });
   const Ln = P.lines.find(x => x.id === ui.lineId); if (!Ln) return;
   const done = () => { calcCache.clear(); save(); drawLines(); render(); };
+  on('#lnMatEdit', () => matEditor(Ln.matKey, () => openLine(Ln.id), false));
   on('#lnBack', () => { ui.lineId = null; drawLines(); render(); });
   on('#lnDel', async () => { if (await confirmBox(`Delete line ${lineNo(Ln)}: ${Ln.desc}?`, 'Delete')) { P.lines = P.lines.filter(x => x !== Ln); ui.lineId = null; done(); } });
   on('#lnMeasure', () => measureLine(Ln));
@@ -2732,6 +3120,7 @@ function bindTakeoff(all, on) {
       Ln.equip = e.value; if (e.value) { P.equipOn = P.equipOn || {}; P.equipOn[e.value] = true; }
     }
     else if (k === 'typed') { const v = parseFloat(e.value); Ln.typed = isFinite(v) ? v : null; }
+    else if (k === 'matKey') { if (!e.value && Ln.matKey) Ln.mat = matPrice(Ln.matKey); Ln.matKey = e.value || null; }
     else if (k === 'mat') { const v = parseFloat(e.value); Ln.mat = isFinite(v) ? v : (Ln.calc === 'msf' ? null : 0); }
     else { const v = parseFloat(e.value); Ln[k] = isFinite(v) ? v : 0; }
     done();
@@ -3075,7 +3464,10 @@ function exportDialog() {
   const inClaude = !!(window.claude && typeof window.claude.use === 'function');
   const card = $('#modalCard'); card.classList.remove('wide');
   const ck = (k, title, sub) => `<label class="xrow"><input type="checkbox" data-x="${k}" ${x[k] ? 'checked' : ''}><span><b>${title}</b><small>${sub}</small></span></label>`;
-  card.innerHTML = `<h2 style="margin:0 0 4px">Export job</h2>
+  const off = officePrefs();
+  card.innerHTML = `<button class="pri big office" id="xOffice" style="width:100%">📤 Send to office${off.email ? `<small style="display:block;font-weight:400;font-size:12px;opacity:.85">${esc(off.email)}</small>` : ''}</button>
+    <div class="row" style="justify-content:flex-end;margin:4px 0 8px"><button class="sec" id="xOffEmail" style="flex:0 0 auto;padding:6px 10px;font-size:13px">${off.email ? 'Change office email' : 'Set office email'}</button></div>
+    <h2 style="margin:0 0 4px">Export job</h2>
     <p class="muted" style="margin:0 0 10px">Send the files to yourself and finish the spreadsheet and proposal on a computer.</p>
     <div class="list">
       ${ck('xlsx', 'Takeoff spreadsheet', 'Excel (.xlsx) with live formulas and a Rates tab')}
@@ -3092,6 +3484,8 @@ function exportDialog() {
   $('#modal').classList.remove('hidden');
   const close = () => $('#modal').classList.add('hidden');
   $('#xCancel').onclick = close;
+  $('#xOffice').onclick = () => { close(); sendToOffice(); };
+  $('#xOffEmail').onclick = async () => { close(); await officeEmailForm(!officePrefs().email); exportDialog(); };
   const run = async mode => {
     card.querySelectorAll('[data-x]').forEach(c => { x[c.dataset.x] = c.checked; });
     x.page = $('#xPage').value; x.email = $('#xEmail').value.trim(); save(true);
@@ -3117,6 +3511,87 @@ function exportDialog() {
   };
   $('#xGo').onclick = () => run('share');
   $('#xDl').onclick = () => run('download');
+}
+
+
+// ---------- Send to office: one tap from the field to your office email ----------
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function officePrefs() { const o = store.office = store.office || {}; const d = { email: '', job: true, plan: true, xlsx: false, proposal: false }; for (const k in d) if (o[k] == null) o[k] = d[k]; return o; }
+async function officeEmailForm(first) {
+  const o = officePrefs();
+  for (;;) {
+    const v = await form(first ? 'Set up Send to office' : 'Office email', [
+      { key: 'email', label: 'Office email address', type: 'email', value: o.email || (store.company && store.company.email) || '', placeholder: 'office@yourcompany.com', help: 'Send to office always sends the job here. You can change it any time.' }
+    ], first ? 'Save & continue' : 'Save');
+    if (!v) return false;
+    const em = (v.email || '').trim();
+    if (EMAIL_RE.test(em)) { o.email = em; save(true); return true; }
+    toast('That email address doesn’t look right — check it and try again', 3500);
+  }
+}
+async function sendToOffice() {
+  const o = officePrefs();
+  if (!o.email && !(await officeEmailForm(true))) return;
+  const card = $('#modalCard'); card.classList.remove('wide');
+  const ck = (k, title, sub, dis) => `<label class="xrow"><input type="checkbox" data-o="${k}" ${o[k] ? 'checked' : ''} ${dis ? 'disabled' : ''}><span><b>${title}</b><small>${sub}</small></span></label>`;
+  const measured = P.lines.filter(Ln => lineQty(Ln).measured).length;
+  card.innerHTML = `<h2 style="margin:0 0 4px">📤 Send to office</h2>
+    <div class="offto"><span>To</span><b>${esc(o.email)}</b><button class="sec" id="oChange" type="button">Change</button></div>
+    <div class="muted" style="margin:6px 0 10px">${esc(P.name)} · ${P.lines.length} takeoff item${P.lines.length === 1 ? '' : 's'}${P.lines.length ? ` (${measured} measured)` : ''}</div>
+    <div class="list">
+      ${ck('job', 'Job file', 'Opens the whole job in SiteWalk on your computer (Import), ready to adjust, print and email')}
+      ${ck('plan', 'Site drawing', 'Letter PDF with border and title block')}
+      ${ck('xlsx', 'Takeoff spreadsheet', 'Excel (.xlsx). On some Android phones this sends the files as a .zip instead')}
+      ${ck('proposal', 'Proposal', 'PDF draft at today’s prices')}
+    </div>
+    <div id="oStatus" class="muted" role="status" aria-live="polite" style="margin-top:10px"></div>
+    <div class="row" style="margin-top:14px"><button class="sec" id="oClose" type="button">Close</button><button class="pri" id="oSend" type="button">Send</button></div>`;
+  $('#modal').classList.remove('hidden');
+  const close = () => $('#modal').classList.add('hidden');
+  $('#oClose').onclick = close;
+  $('#oChange').onclick = async () => { if (await officeEmailForm(false)) sendToOffice(); else sendToOffice(); };
+  let ready = null;
+  const st = $('#oStatus'), btn = $('#oSend');
+  const meta = () => ({ email: o.email, subject: `SiteWalk job: ${P.name}`,
+    body: `${P.name}${P.address ? ' — ' + P.address : ''}\n${P.lines.length} takeoff items · current bid ${money(estimate().total)}\n\nOn the computer: open SiteWalk, click the job name at the top left, choose Import, and pick the attached .sitewalk file.\n\nSent from the field with SiteWalk.` });
+  const copyTo = () => { try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(o.email).catch(() => { }); } catch (e) { } };
+  const deliver = async () => {
+    const inClaude = !!(window.claude && typeof window.claude.use === 'function');
+    const fl = ready.map(f => new File([f.blob], f.name, { type: f.blob.type }));
+    if (!inClaude && navigator.canShare && navigator.canShare({ files: fl })) {
+      copyTo();
+      try {
+        await navigator.share({ files: fl, title: meta().subject, text: meta().body });
+        st.innerHTML = `Sent to the share sheet. <b>In the email, tap To and paste</b> — ${esc(o.email)} is copied.`;
+        btn.textContent = 'Send again'; ready = null; return;
+      } catch (e) {
+        if (e.name === 'AbortError') { st.textContent = 'Cancelled. Tap Open email to try again.'; btn.textContent = 'Open email'; return; }
+        if (e.name === 'NotAllowedError') { st.textContent = 'Files are ready. Tap Open email.'; btn.textContent = 'Open email'; return; }
+      }
+    }
+    // can't hand these files to the share sheet: download them and open an email already addressed to the office
+    const r = await deliverFiles(ready, 'share', meta());
+    st.textContent = r === 'downloaded' ? (inClaude ? 'Saved the files (in this preview the email step is skipped).' : `Saved to Downloads. An email to ${o.email} is opening — attach the file from Downloads.`) : r === 'shared' ? 'Sent to the share sheet.' : 'Cancelled.';
+    btn.textContent = 'Send again'; ready = null;
+  };
+  btn.onclick = async () => {
+    if (ready) { await deliver(); return; }   // second tap: hand the built files to email
+    copyTo();
+    card.querySelectorAll('[data-o]').forEach(c => { o[c.dataset.o] = c.checked; }); save(true);
+    if (!o.job && !o.plan && !o.xlsx && !o.proposal) { st.textContent = 'Pick at least one file.'; return; }
+    btn.disabled = true;
+    try {
+      const files = [], base = safeName(P.name);
+      if (o.job) files.push({ name: `${base}.sitewalk.txt`, blob: new Blob([JSON.stringify(P)], { type: 'text/plain' }) });
+      if ((o.plan || o.proposal) && !needPdfLib()) throw new Error('PDF library missing');
+      if (o.plan) { st.textContent = 'Drawing the site plan…'; files.push({ name: `${base}_site_plan.pdf`, blob: await planPDF('letter') }); }
+      if (o.proposal) { st.textContent = 'Building the proposal…'; files.push({ name: `${base}_proposal.pdf`, blob: await proposalPDF() }); }
+      if (o.xlsx) { const b = xlsxBlob(); if (b) files.push({ name: `${base}_takeoff.xlsx`, blob: b }); }
+      ready = files; st.textContent = 'Opening email…';
+      await deliver();
+    } catch (e) { st.textContent = e.message || 'Could not build the files'; ready = null; }
+    finally { btn.disabled = false; }
+  };
 }
 
 // ---------- install (Android prompt / iPhone instructions) ----------
@@ -3151,5 +3626,5 @@ async function installApp() {
 refreshMap(); render();
 showSplash();
 if ('serviceWorker' in navigator && window.isSecureContext && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
-window.__app = { get P() { return P; }, showSplash, startTakeoffFlow, openTakeoffEntry, guessItem, map, traceBoundary, setupBoundary, isWalking: () => walk.active, drawFeatures, onOpen, switchProject, newProject, toast, refreshMap, render, planSVG, bearingText, buildSurface, calcArea, estimate, startDraw, endDraw, draw, setTab, openArea, openLine, lineQty, migrateLines, store };
+window.__app = { get P() { return P; }, sendToOffice, showSplash, startTakeoffFlow, openTakeoffEntry, guessItem, map, traceBoundary, setupBoundary, isWalking: () => walk.active, drawFeatures, onOpen, switchProject, newProject, toast, refreshMap, render, planSVG, bearingText, buildSurface, calcArea, estimate, startDraw, endDraw, draw, setTab, openArea, openLine, lineQty, migrateLines, store };
 })();
