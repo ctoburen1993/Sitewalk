@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SiteWalk">
+<meta name="theme-color" content="#0b3d91">
+<title>SiteWalk Takeoff</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="lib/leaflet.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="splash" class="hidden" role="dialog" aria-label="SiteWalk">
+  <svg class="sp-topo" viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g fill="none" stroke="#fff" stroke-width="1.4">
+    <path d="M-20 120 C80 80 160 170 260 130 S380 90 430 120"/><path d="M-20 170 C70 130 170 220 270 180 S390 140 430 170"/><path d="M-20 225 C90 190 160 280 280 235 S380 205 430 225"/>
+    <path d="M-20 560 C60 520 150 610 250 570 S370 530 430 560"/><path d="M-20 615 C80 575 170 660 270 620 S380 585 430 610"/><path d="M-20 670 C90 640 180 715 290 675 S390 645 430 665"/><path d="M-20 725 C100 700 190 765 300 730 S395 705 430 720"/>
+    <ellipse cx="320" cy="390" rx="60" ry="34"/><ellipse cx="320" cy="390" rx="100" ry="60"/><ellipse cx="320" cy="390" rx="140" ry="88"/></g></svg>
+  <div class="sp-mid">
+    <svg class="sp-logo" viewBox="50 96 410 290" aria-hidden="true"><g id="exc"> <rect x="62" y="318" width="250" height="56" rx="28" fill="#2b2f36"/> <rect x="72" y="326" width="230" height="40" rx="20" fill="#3d434c"/> <circle cx="98" cy="346" r="14" fill="#FFC72C"/><circle cx="276" cy="346" r="14" fill="#FFC72C"/> <circle cx="157" cy="350" r="8" fill="#FFC72C"/><circle cx="217" cy="350" r="8" fill="#FFC72C"/> <rect x="96" y="296" width="182" height="26" rx="6" fill="#2b2f36"/> <path d="M84 300 L84 236 Q84 222 98 222 L176 222 L176 300 Z" fill="#FFC72C"/> <rect x="84" y="252" width="22" height="48" fill="#E0A800"/> <path d="M176 300 L176 176 Q176 164 188 164 L236 164 Q246 164 250 174 L270 248 L270 300 Z" fill="#FFC72C"/> <path d="M190 180 L232 180 Q238 180 240 186 L254 240 L190 240 Z" fill="#9fd3ff" opacity=".95"/> <path d="M250 262 L336 120 L362 134 L278 280 Z" fill="#FFC72C"/> <circle cx="264" cy="270" r="10" fill="#2b2f36"/> <path d="M338 112 L364 108 L414 250 L392 260 Z" fill="#E0A800"/> <circle cx="350" cy="122" r="10" fill="#2b2f36"/> <path d="M268 228 L330 150" stroke="#cfd5dc" stroke-width="8" stroke-linecap="round"/> <path d="M392 244 L428 236 Q448 270 430 304 L398 316 L380 300 L404 292 Q414 272 400 258 Z" fill="#2b2f36"/> <circle cx="403" cy="254" r="8" fill="#FFC72C"/> </g></svg>
+    <h1>SiteWalk</h1>
+    <p>Sitework takeoff in the field</p>
+  </div>
+  <div class="sp-bot">
+    <button id="spStart" class="sp-go">Start takeoff</button>
+    <button id="spOpen" class="sp-link" hidden>Open a saved job</button>
+  </div>
+</div>
+
+<div id="flowBar">
+  <div class="fb-msg">Stand on the site, then mark the area you're pricing.</div>
+  <button id="flowGo" class="sp-go">Mark area / property boundary</button>
+  <button id="flowSkip" class="sp-link">Skip, go straight to the takeoff</button>
+</div>
+
+<div id="map"></div>
+
+<header id="top">
+  <button id="projBtn" class="chip" aria-label="Projects"><span id="projName">New site</span> ▾</button>
+  <button id="btnEquip" class="chip eqb" aria-haspopup="dialog" aria-label="Equipment for this job">🚜 <span class="lbl">Equipment</span> <span id="eqCount" class="cnt">0</span></button>
+  <button id="btnExport" class="chip exp" aria-label="Export or email this job">⇪<span class="lbl"> Export</span></button>
+  <div id="gpsBadge" class="badge hidden">GPS —</div>
+</header>
+
+<div id="fab">
+  <button id="btnLocate" title="My location" aria-label="My location">◎</button>
+  <button id="btnLayers" title="Map layers" aria-label="Map layers">▤</button>
+  <button id="btnContours" title="Contours" aria-label="Contours">≋</button>
+  <button id="btnAddFeat" title="Add feature" aria-label="Add feature" aria-haspopup="menu">＋</button>
+</div>
+
+<div id="drawBar" class="hidden">
+  <div id="drawMsg">Tap map to add corners</div>
+  <div id="drawSub"></div>
+  <div class="row" id="dGpsRow">
+    <button id="dMark" class="pri big hidden">📍 Mark corner here</button>
+    <button id="dTrace" class="sec hidden">〰 Trace</button>
+  </div>
+  <div class="row" id="dExtra">
+    <button id="dGps" class="sec">+ My GPS spot</button>
+    <button id="dWalk" class="sec">Use walk path</button>
+  </div>
+  <div class="row">
+    <button id="dUndo" class="sec">Undo</button>
+    <button id="dCancel" class="sec">Cancel</button>
+    <button id="dDone" class="pri">Done</button>
+  </div>
+</div>
+
+<section id="sheet" class="collapsed">
+  <div id="grab"><span></span></div>
+  <div id="panel"></div>
+</section>
+
+<nav id="tabs">
+  <button data-tab="site" class="on"><i>⌖</i>Site</button>
+  <button data-tab="walk"><i>⛶</i>Walk</button>
+  <button data-tab="features"><i>⌂</i>Features</button>
+  <button data-tab="takeoff"><i>☰</i>Takeoff</button>
+  <button data-tab="estimate"><i>$</i>Estimate</button>
+</nav>
+
+<div id="modal" class="hidden"><div class="card" id="modalCard"></div></div>
+<div id="toast" class="hidden"></div>
+<div id="report"></div>
+
+<script src="lib/leaflet.js"></script>
+<script src="lib/d3.min.js"></script>
+<script src="lib/xlsx.mini.min.js"></script>
+<script src="lib/jspdf.umd.min.js"></script>
+<script src="lib/jszip.min.js"></script>
+<script src="geo.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
