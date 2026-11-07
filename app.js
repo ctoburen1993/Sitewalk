@@ -120,6 +120,7 @@ function confirmBox(msg, okText = 'OK') {
 // ======================================================================
 // Storage
 // ======================================================================
+const APP_REV = 'sitewalk11072026-1';   // set by the release script: sitewalk + MMDDYYYY + - + that day's revision
 const LS_KEY = 'sitewalk.v1';
 let store = { projects: [], currentId: null, prices: clone(DEFAULT_PRICES), materials: clone(MATERIALS) };
 try { const s = JSON.parse(localStorage.getItem(LS_KEY)); if (s && s.projects) store = Object.assign(store, s); } catch (e) { /* fresh */ }
@@ -500,15 +501,15 @@ function toggleContours() {
   if (contoursOn) { drawContours(); lyr.contours.addTo(map); } else map.removeLayer(lyr.contours);
 }
 
-function drawHeat(a, res) {
-  lyr.heat.clearLayers();
-  if (!a || !res || !res.dz) return;
+// Cut (red) / fill (blue) picture of a pad or grading result, in local feet
+function heatImage(res) {
+  if (!res || !res.dz || !res.ras) return null;
   const { ras, dz } = res, [minx, miny, maxx, maxy] = ras.bbox, r = ras.r;
   const w = Math.max(1, Math.ceil((maxx - minx) / r)), h = Math.max(1, Math.ceil((maxy - miny) / r));
-  if (w * h > 4e6) return;
+  if (w * h > 4e6) return null;
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   const ctx = cv.getContext('2d'), img = ctx.createImageData(w, h);
-  const mx = Math.max(0.5, res.maxCut, res.maxFill);
+  const mx = Math.max(0.5, res.maxCut || 0, res.maxFill || 0);
   for (let k = 0; k < ras.cells.length; k++) {
     const d = dz[k]; if (!isFinite(d)) continue;
     const [x, y] = ras.cells[k];
@@ -516,12 +517,19 @@ function drawHeat(a, res) {
     const t = Math.min(1, Math.abs(d) / mx), o = (iy * w + ix) * 4;
     if (Math.abs(d) < 0.05) { img.data.set([255, 255, 255, 120], o); continue; }
     const c = d > 0 ? [217, 48, 37] : [26, 115, 232];
-    img.data.set([255 + (c[0] - 255) * (0.25 + 0.75 * t), 255 + (c[1] - 255) * (0.25 + 0.75 * t), 255 + (c[2] - 255) * (0.25 + 0.75 * t), 175], o);
+    img.data.set([255 + (c[0] - 255) * (0.3 + 0.7 * t), 255 + (c[1] - 255) * (0.3 + 0.7 * t), 255 + (c[2] - 255) * (0.3 + 0.7 * t), 185], o);
   }
   ctx.putImageData(img, 0, 0);
-  const sw = G.toLL(minx, maxy - h * r, origin()), ne = G.toLL(minx + w * r, maxy, origin());
-  L.imageOverlay(cv.toDataURL(), [sw, ne], { pane: 'heatPane', interactive: false, className: 'pix' }).addTo(lyr.heat);
+  return { url: cv.toDataURL(), minx, maxy, w: w * r, h: h * r };
 }
+function drawHeat(a, res, keep) {
+  if (!keep) lyr.heat.clearLayers();
+  const im = a ? heatImage(res) : null; if (!im) return;
+  const sw = G.toLL(im.minx, im.maxy - im.h, origin()), ne = G.toLL(im.minx + im.w, im.maxy, origin());
+  L.imageOverlay(im.url, [sw, ne], { pane: 'heatPane', interactive: false, className: 'pix' }).addTo(lyr.heat);
+  heatKey(true);
+}
+function heatKey(on) { const k = document.getElementById('heatKey'); if (k) k.hidden = !on; }
 
 // ======================================================================
 // Quantities
@@ -1119,7 +1127,7 @@ async function projectsDialog() {
     <div class="row mt"><button class="pri" id="pNew">+ New site</button><button class="sec" id="pRename">Rename</button></div>
     <div class="row mt"><button class="sec" id="pExport">Export</button><button class="sec" id="pImport">Import</button><button class="dng" id="pDelete">Delete</button></div>
     ${isStandalone() ? '' : '<button class="sec mt" id="pInstall" style="width:100%">📲 Install on this phone</button>'}
-    <button class="sec mt" id="pClose" style="width:100%">Close</button><input type="file" id="pFile" accept=".json,.txt,application/json,text/plain" class="hidden">`;
+    <button class="sec mt" id="pClose" style="width:100%">Close</button><input type="file" id="pFile" accept=".json,.txt,application/json,text/plain" class="hidden"><div class="muted" style="text-align:center;margin-top:10px;font-size:12px">SiteWalk Rev ${APP_REV}</div>`;
   $('#modal').classList.remove('hidden');
   const close = () => $('#modal').classList.add('hidden');
   card.querySelectorAll('[data-proj]').forEach(b => b.onclick = () => { switchProject(b.dataset.proj); close(); });
@@ -1396,6 +1404,7 @@ function planSVG(opt) {
   if (opt.trees) P.trees.forEach(t => { const [x, y] = xyOf([t.lat, t.lon]); const r = Math.max(6, treeCanopy(t) / 2 * k); placed.push([X(x), Y(y), r * 2, r * 2]); });
   if (bxy) { const c = G.polyCentroid(bxy); bLabelY = slot(X(c[0]), Y(c[1]), 130, 26); }
   // takeoff items, numbered to match the takeoff
+  let cutFillShown = false;
   if (opt.areas) P.lines.forEach((Ln, i) => {
     const col = lineColor(Ln), n = i + 1, q = lineQty(Ln), tags = [];
     (Ln.shapes || []).forEach(sh => {
@@ -1404,7 +1413,7 @@ function planSVG(opt) {
       else if (sh.geom === 'line') {
         if (Ln.calc === 'stone') G.lineBufferRects(xy, Ln.params.widthFt || 12).forEach(r => { s += `<path d="${path(r, true)}" fill="${col}" fill-opacity="0.22" stroke="none"/>`; });
         s += `<path d="${path(xy, false)}" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="8 3"/>`;
-      } else if (Ln.calc === 'pad') { const top = G.offsetPolygon(xy, Ln.params.offsetFt == null ? 6 : Ln.params.offsetFt); s += `<path d="${path(top, true)}" fill="url(#hatch)" stroke="${col}" stroke-width="1.2"/><path d="${path(xy, true)}" fill="#fff" fill-opacity="0.7" stroke="#333" stroke-width="1.2" stroke-dasharray="5 3"/>`; }
+      } else if (Ln.calc === 'pad') { const top = G.offsetPolygon(xy, Ln.params.offsetFt == null ? 6 : Ln.params.offsetFt), im = q.pad ? heatImage(q.pad) : null; if (im) { s += `<image href="${im.url}" x="${X(im.minx)}" y="${Y(im.maxy)}" width="${im.w * k}" height="${im.h * k}" preserveAspectRatio="none" opacity="0.75"/>`; cutFillShown = true; } s += `<path d="${path(top, true)}" fill="${im ? 'none' : 'url(#hatch)'}" stroke="${col}" stroke-width="1.2"/><path d="${path(xy, true)}" fill="#fff" fill-opacity="0.7" stroke="#333" stroke-width="1.2" stroke-dasharray="5 3"/>`; }
       else s += `<path d="${path(xy, true)}" fill="${Ln.calc === 'grade' ? 'url(#hatch)' : col}" fill-opacity="${Ln.calc === 'grade' ? 1 : 0.18}" stroke="${col}" stroke-width="1.2"/>`;
       tags.push(sh.geom === 'points' ? xy[0] : sh.geom === 'line' ? xy[Math.floor(xy.length / 2)] : G.polyCentroid(xy));
     });
@@ -1505,6 +1514,7 @@ function planSVG(opt) {
   if (P.features.some(f => f.type === 'woods')) leg.push([(x, y) => `<path d="M${x + 4} ${y + 4}a4 4 0 0 1 8 0a4 4 0 0 1 8 0a4 4 0 0 1 8 0a4 4 0 0 1 8 0" fill="none" stroke="#333" stroke-width="1.1"/><path d="M${x + 4} ${y + 4}l32 0" stroke="#333" stroke-width="0.6"/>`, 'TREE CLOUD (WOODED AREA)']);
   if (P.features.some(f => f.type === 'tree')) leg.push([(x, y) => `<circle cx="${x + 20}" cy="${y}" r="6" fill="#1b7a3a" fill-opacity="0.1" stroke="#1b7a3a"/><circle cx="${x + 20}" cy="${y}" r="1.6" fill="#1b7a3a"/>`, 'TREE (CANOPY SPREAD)']);
   const mLines = opt.areas ? P.lines.filter(Ln => (Ln.shapes || []).length) : [];
+  if (cutFillShown) leg.push([(x, y) => `<rect x="${x + 2}" y="${y - 6}" width="18" height="12" fill="#d93025" fill-opacity="0.75"/><rect x="${x + 20}" y="${y - 6}" width="18" height="12" fill="#1a73e8" fill-opacity="0.75"/>`, 'PAD CUT (RED) / FILL (BLUE)']);
   if (mLines.length) leg.push([(x, y) => `<circle cx="${x + 20}" cy="${y}" r="6" fill="#e8710a" stroke="#fff"/><text x="${x + 20}" y="${y + 2.6}" font-size="7" font-weight="700" fill="#fff" text-anchor="middle">1</text>`, TAB ? 'TAKEOFF ITEM NUMBER — SEE LIST BELOW' : 'TAKEOFF ITEM NUMBER (SEE ESTIMATE)']);
   if (opt.areas && P.lines.some(Ln => Ln.calc === 'pad' && Ln.shapes.length)) leg.push([(x, y) => `<rect x="${x + 6}" y="${y - 6}" width="28" height="12" fill="url(#hatch)" stroke="${TYPE.pad.color}"/><rect x="${x + 12}" y="${y - 3}" width="16" height="6" fill="#fff" stroke="#333" stroke-dasharray="3 2" stroke-width="0.8"/>`, 'BUILDING PAD / HOUSE']);
   const syms = [...new Set(P.features.filter(f => f.geom === 'point' && f.type !== 'tree').map(f => f.type))];
@@ -1832,6 +1842,7 @@ async function afterBoundary() {
 // Start screen → boundary → takeoff items, the way it's used in the field
 // ======================================================================
 function showSplash() {
+  const rv = document.getElementById('spRev'); if (rv) rv.textContent = 'Rev ' + APP_REV;
   $('#spOpen').hidden = !store.projects.some(p => !projectEmpty(p));
   $('#splash').classList.remove('hidden');
 }
@@ -2810,14 +2821,15 @@ function drawLines() {
         L.polyline(s.pts, { color: col, weight: sel ? 6 : 4, opacity: 0.95 }).addTo(lyr.lines).on('click', click);
         tag(s.pts[Math.floor(s.pts.length / 2)], `${n}`);
       } else {
-        if (Ln.calc === 'pad') { const top = G.offsetPolygon(s.pts.map(xyOf), Ln.params.offsetFt == null ? 6 : Ln.params.offsetFt).map(([x, y]) => llOf(x, y)); L.polygon(top, { color: col, weight: sel ? 3 : 2, fillColor: col, fillOpacity: sel ? 0.05 : 0.15 }).addTo(lyr.lines).on('click', click); L.polygon(s.pts, { color: col, weight: 2, dashArray: '6 4', fill: false, interactive: false }).addTo(lyr.lines); }
+        if (Ln.calc === 'pad') { const top = G.offsetPolygon(s.pts.map(xyOf), Ln.params.offsetFt == null ? 6 : Ln.params.offsetFt).map(([x, y]) => llOf(x, y)); L.polygon(top, { color: col, weight: sel ? 3 : 2, fillColor: col, fillOpacity: Ln.params.slabElev != null ? 0.01 : 0.15 }).addTo(lyr.lines).on('click', click); L.polygon(s.pts, { color: col, weight: 2, dashArray: '6 4', fill: false, interactive: false }).addTo(lyr.lines); }
         else L.polygon(s.pts, { color: col, weight: sel ? 4 : 2.5, fillColor: col, fillOpacity: sel ? 0.12 : 0.22 }).addTo(lyr.lines).on('click', click);
         tag(llOf(...G.polyCentroid(s.pts.map(xyOf))), `${n}`);
       }
     });
   });
   const Ln = (P.lines || []).find(x => x.id === ui.lineId);
-  if (Ln && (Ln.calc === 'pad' || Ln.calc === 'grade')) { const q = lineQty(Ln); drawHeat(null, q.pad || q.grade || null); } else lyr.heat.clearLayers();
+  lyr.heat.clearLayers(); heatKey(false);
+  (P.lines || []).forEach(x => { if (x.calc !== 'pad' && !(x.calc === 'grade' && x === Ln)) return; const q = lineQty(x); if (q.pad || q.grade) drawHeat(true, q.pad || q.grade, true); });
 }
 
 // ---- Takeoff tab

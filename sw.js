@@ -1,5 +1,5 @@
 // App-shell cache so the app opens with no signal. Map tiles and USGS data still need a connection.
-const CACHE = 'sitewalk-v4';
+const CACHE = 'sitewalk11072026-1';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'geo.js', 'lib/leaflet.js', 'lib/leaflet.css', 'lib/d3.min.js', 'lib/xlsx.mini.min.js', 'lib/jspdf.umd.min.js', 'lib/jszip.min.js',
   'lib/images/marker-icon.png', 'lib/images/marker-icon-2x.png', 'lib/images/marker-shadow.png', 'manifest.webmanifest', 'icon-192.png', 'icon-180.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });

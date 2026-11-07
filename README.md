@@ -110,7 +110,7 @@ The app then:
 - **Slopes the edges at 3:1** up or down until they meet existing grade, using the LiDAR contours. This gives cut and fill for the whole pad, slopes included.
 - **Adds 35% to the fill** for compaction loss ("dirt needed"), then shows the net import or the extra dirt.
 
-The price card shows the finish slab, pad elevation, cut and fill, with a **Change** button. In the item's details (Edit details), the **Finish slab elevation** box is at the top. Offset, side slope, slab and stone thickness, compaction % and topsoil strip are under **Pad settings**. The cut/fill heat map shows on the map while the item is open.
+The price card shows the finish slab, pad elevation, cut and fill, with a **Change** button. In the item's details (Edit details), the **Finish slab elevation** box is at the top. Offset, side slope, slab and stone thickness, compaction % and topsoil strip are under **Pad settings**. **Cut and fill are shaded across the pad**, red where you cut and blue where you fill (darker means deeper), with a Cut / Fill key at the top of the map. The shading stays on the map for every pad, and it's printed on the site drawing with a legend entry.
 
 ## Driveway stone
 **Driveway stone** defaults to centerline × 12 ft width × 6" thick at 1.5 tons/CY plus 15% compaction, with optional fabric.
