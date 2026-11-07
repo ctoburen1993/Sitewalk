@@ -176,7 +176,7 @@ What the work covers:
 ## Equipment
 Tap **🚜 Equipment** in the top bar, or **Choose equipment** on the Estimate tab.
 - **Check list:** a drop-down of check boxes. Check the machines this job needs and the takeoff re-prices right away.
-- **Starting list:** Silverado 2500 Truck, Small trailer, Large Gooseneck trailer, Kubota Tractor, Kubota KX-040 Mini excavator, Kubota KX80 Excavator, Case Bulldozer, Trencher, Bobcat, Kubota SCL1000 Skid Steer. Phones that saved the older generic list get these names on the next update, and keep any prices they changed. Everything is **owned** except the **Case Bulldozer** and the **Bobcat**, which are rented. Owned machines have no delivery charge (you haul them yourself), no rental waiver or tax, and can be billed by the hour. Each has a **$/hour, $/day and $/week** rate, plus gal/hr and delivery each way.
+- **Starting list:** Silverado 2500 Truck, Small trailer, Large Gooseneck trailer, Kubota Tractor, Kubota KX-040 Mini excavator, Kubota KX80 Excavator, Case Bulldozer, Trencher, Bobcat T76, Kubota SCL1000 Skid Steer. Phones that saved the older generic list get these names on the next update, and keep any prices they changed. Everything is **owned** except the **Case Bulldozer** and the **Bobcat T76**, which are rented. Owned machines have no delivery charge (you haul them yourself), no rental waiver or tax, and can be billed by the hour. Each has a **$/hour, $/day and $/week** rate, plus gal/hr and delivery each way.
 - **Picking the machine for each job:** the app uses the best checked machine that can do the work.
   - **Digging and clearing:** excavator, else mini excavator.
   - **Grading and spreading:** bulldozer, else Bobcat, skid steer, mini excavator or tractor, at a lower speed.

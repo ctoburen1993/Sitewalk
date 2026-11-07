@@ -1925,12 +1925,12 @@ const DEFAULT_EQUIP = [
   { id: 'exc',      name: 'Kubota KX80 Excavator',      hour: 135, day: 850, week: 2400, burn: 3.5, deliver: 0, rented: false,  on: true,  roles: ['dig'], speed: 100 },
   { id: 'dozer',    name: 'Case Bulldozer',      hour: 100, day: 650, week: 1500, burn: 4.0, deliver: 250, rented: true,  on: true,  roles: ['grade'], speed: 100 },
   { id: 'trencher', name: 'Trencher',       hour: 45,  day: 280, week: 980,  burn: 1.5, deliver: 0, rented: false,  on: true,  roles: ['trench'], speed: 100 },
-  { id: 'bobcat',   name: 'Bobcat',         hour: 60,  day: 375, week: 1150, burn: 2.5, deliver: 150, rented: true,  on: false, roles: ['grade'], speed: 60 },
+  { id: 'bobcat',   name: 'Bobcat T76',         hour: 60,  day: 375, week: 1150, burn: 2.5, deliver: 150, rented: true,  on: false, roles: ['grade'], speed: 60 },
   { id: 'skid',     name: 'Kubota SCL1000 Skid Steer',     hour: 50,  day: 300, week: 950,  burn: 2.0, deliver: 0, rented: false,  on: false, roles: ['grade'], speed: 50 }
 ];
 const ROLE_LABEL = { dig: 'Digging & clearing', grade: 'Grading & spreading', trench: 'Trenching', support: 'Truck / trailer / support' };
 // v2 names the actual machines. Saved lists that still use the old generic names get the new names; prices and edits are kept.
-const EQUIP_V = 3, EQUIP_OLD_NAMES = { truck: 'Truck', trailerL: 'Large trailer', tractor: 'Tractor', mini: 'Mini excavator', exc: 'Excavator', dozer: 'Bulldozer', skid: 'Skid steer' };
+const EQUIP_V = 4, EQUIP_OLD_NAMES = { truck: 'Truck', trailerL: 'Large trailer', tractor: 'Tractor', mini: 'Mini excavator', exc: 'Excavator', dozer: 'Bulldozer', skid: 'Skid steer', bobcat: 'Bobcat' };
 function equipList() {
   if (!Array.isArray(store.equipList) || !store.equipList.length) { store.equipList = clone(DEFAULT_EQUIP); store.equipV = EQUIP_V; }
   if (store.equipV !== EQUIP_V) {
