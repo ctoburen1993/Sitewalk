@@ -373,3 +373,47 @@ body.flow #heatKey,body.drawing #heatKey{display:none}
 @media (min-width:760px){#heatKey{left:calc(50% + 190px)}}
 @media (max-width:759px){#heatKey{top:calc(var(--safe-t) + 104px)}}
 .sp-rev{font-size:11px;opacity:.6;letter-spacing:.3px;margin-top:2px}
+
+/* ---- imagery finder ---- */
+.imsrc.on{outline:2px solid var(--pri)}
+.imsrc .best{background:var(--ok);color:#fff;font-size:11px;border-radius:8px;padding:1px 6px;margin-left:4px;vertical-align:middle}
+.imsrc .stars{color:#e8a700;letter-spacing:1px}
+a.btnlink{display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink);background:var(--bg2);border-radius:10px;padding:10px;font-weight:600;flex:1}
+.progress i.indet{animation:indet 1.2s linear infinite;background:linear-gradient(90deg,var(--pri) 0 40%,transparent 40%);background-size:200% 100%}
+@keyframes indet{from{background-position:100% 0}to{background-position:-100% 0}}
+.imsrc .t b{white-space:normal}
+
+/* ---- tips ---- */
+.tipcard{background:#fff8e1;border:1px solid #f0c64a;border-radius:12px;padding:10px 12px;margin-top:10px;font-size:14px;color:#3d3200}
+.tipcard .tiphead{font-weight:700;margin-bottom:3px}
+.tipcard .tipwarn{margin-top:6px;color:#9a3b00}
+.tipcard .tipmore{background:none;border:0;padding:0;margin-top:6px;color:#8a5a00;text-decoration:underline;font-size:13px;width:auto}
+.tipmark{font-size:15px;margin:4px 0 6px;font-weight:600}
+.tiplist{margin:4px 0 8px;padding-left:20px}
+.tiplist li{margin:4px 0}
+details{background:var(--bg2);border-radius:10px;padding:8px 10px;margin-top:6px}
+details summary{cursor:pointer;font-weight:600}
+#dGpsRow #dTip{flex:0 0 46px;padding:0}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .tipcard{background:#3a2f12;border-color:#7a6220;color:#f5e6b8}:root:not([data-theme="light"]) .tipcard .tipmore{color:#f0c64a}:root:not([data-theme="light"]) .tipcard .tipwarn{color:#ffb38a}}
+:root[data-theme="dark"] .tipcard{background:#3a2f12;border-color:#7a6220;color:#f5e6b8}
+
+/* ---- tax parcels & corner finder ---- */
+.ppop b{display:block;font-size:14px}
+.ppop .muted{margin:4px 0 8px;font-size:12px}
+.ppop button{width:100%;margin-top:6px;padding:8px}
+#cornerBar{position:fixed;left:10px;right:10px;top:calc(var(--safe-t) + 8px);z-index:1300;background:var(--bg);border-radius:14px;padding:10px;box-shadow:0 4px 16px #0006;display:flex;flex-direction:column;gap:8px}
+#cornerBar.hidden{display:none}
+#cornerBar .cfrow{display:flex;align-items:center;gap:8px}
+#cornerBar .cfrow b{flex:1;font-size:16px}
+#cornerBar .cfrow button{flex:0 0 auto;padding:6px 10px}
+#cornerBar .cfmain{display:flex;align-items:center;gap:14px}
+#cfArrow{font-size:44px;line-height:1;width:54px;height:54px;border-radius:50%;background:#ffd400;color:#1b1b1b;display:flex;align-items:center;justify-content:center;font-weight:900;transition:transform .3s}
+#cfDist{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
+#cfDir{font-size:13px}
+#cornerBar #cfMark{flex:2}
+body.cornering #fab,body.cornering #heatKey{display:none}
+.cfpin{background:#6a1b9a;color:#fff;border:2px solid #fff;border-radius:50%;font:700 12px/22px -apple-system,BlinkMacSystemFont,sans-serif;text-align:center;box-shadow:0 1px 4px #0008}
+.cfpin.sel{background:#ffd400;color:#1b1b1b;transform:scale(1.25)}
+.cfpin.found{background:#188038}
+@media (min-width:760px){#cornerBar{left:392px;right:auto;width:min(440px,calc(100vw - 410px))}}
+@media (max-width:759px){body.cornering #sheet.collapsed{max-height:26px}}

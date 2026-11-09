@@ -52,6 +52,42 @@ Tap **⇪ Export** (top bar, Estimate tab, site plan or proposal) and pick what 
 
 The site drawing's title block fills in your company from the Proposal screen, plus the job, client, scale, date and proposal number.
 
+## Tips while you work
+The app explains what it's looking for as you go:
+- **On the Takeoff screen:** when you type a work item and pick LF, Area or Count, a yellow tip card says what to mark. For example, for a driveway: "Walk down the middle of the driveway." If the unit doesn't fit (Count for a driveway), it suggests the right one.
+- **Before you lay out an item:** a tip pops up with what to mark, how the app figures it, an example, and GPS tips. Check **Don't show this tip again** once you know it.
+- **💡 in the drawing bar** brings the tip back while you're marking.
+- **Boundary:** a tip for clicking corners or tracing your steps before you start.
+- **💡 Tips** on the Takeoff tab lists every tip, including "LF, SF or count — which one?". It can also turn the pop-ups back on, or off.
+
+## County tax maps & finding property corners
+**▤ Map layers → 🗺 Tax parcel map** (also on the Site tab next to the property line) shows county tax parcel lines on the map in yellow.
+- **Free online county maps:** Cherokee, Forsyth, Hall, Bibb, Chatham, Clarke, Clayton, Cobb, Columbia, Coweta, DeKalb, Douglas, Fayette, Fulton, Muscogee, Paulding and Richmond. Pick the county once. For any other county with a public ArcGIS parcel layer, paste its link.
+- **Lumpkin, Dawson, White, Union and others** don't publish a free online tax map. Buy the parcel shapefile from the county GIS office (Lumpkin County GIS: 706-864-6894) and use **📥 Import parcel file…** with the .zip (it must include the .prj file). GeoJSON and KML also work. It's stored on the phone, works offline, and covers the whole county.
+- **Tap a parcel** to see the parcel number, owner, address and acres, then:
+  - **Use as property boundary**, which sets the boundary from the tax map, or
+  - **📍 Find the corners**.
+- **Starting a takeoff:** **Mark area / property boundary** now has a third choice, **🗺 Use the county tax map**.
+
+**Find corners** works with a tax-map parcel or with your own boundary (Site tab → 📍 Find corners). A bar at the top shows the selected corner, the **distance in feet**, and an **arrow and bearing** from where you're standing. These update as you walk.
+- When you find the pin, stand on it and tap **📍 Found it — mark here**. The app averages GPS for 3 seconds and tells you how far the pin is from the tax map.
+- **Use found corners** updates the boundary with the real pin locations.
+
+Tax maps are often off 10–50 ft, and phone GPS adds 10–30 ft more. Look for the iron pin, rebar or monument once you're within about 30 ft; a metal detector helps. This is for pricing, not a survey.
+
+## Sharper map imagery
+Tap **▤ Map layers → 🔍 Find the sharpest imagery here**. The app tests several free imagery sources at your site:
+- **Esri World Imagery**, the standard map
+- **Esri Clarity**, older photos picked for sharpness
+- **Esri Wayback** releases from past years, which are sometimes sharper or taken with the leaves off
+- **USGS National Map** imagery
+
+For each one it finds how far you can really zoom in (detail to zoom 19, 20, 21…) and scores how sharp the photo is on the same spot. The list shows the sharpest first, with stars. Tap **Use** on any source; the job remembers your choice. **Back to standard Esri imagery** undoes it.
+
+The test also runs by itself after you set the boundary. If a clearly sharper source exists there, the app switches to it and tells you.
+
+Google and Bing photos can't be shown inside SiteWalk (their terms don't allow it), so the same screen has **Google Maps** and **Bing Maps** buttons that open your site in their apps for comparison.
+
 ## Opening the app
 Tap the **SiteWalk** icon (the yellow excavator). The app opens on a blue start screen with the logo. Tap the yellow **Start takeoff** button and type the **project name** (for example, *Smith residence, Lot 4*). The name appears on the takeoff, drawing, proposal and emails. To pick up an earlier job, tap **Open a saved job** instead.
 

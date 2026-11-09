@@ -120,7 +120,7 @@ function confirmBox(msg, okText = 'OK') {
 // ======================================================================
 // Storage
 // ======================================================================
-const APP_REV = 'sitewalk11072026-1';   // set by the release script: sitewalk + MMDDYYYY + - + that day's revision
+const APP_REV = 'sitewalk11082026-3';   // set by the release script: sitewalk + MMDDYYYY + - + that day's revision
 const LS_KEY = 'sitewalk.v1';
 let store = { projects: [], currentId: null, prices: clone(DEFAULT_PRICES), materials: clone(MATERIALS) };
 try { const s = JSON.parse(localStorage.getItem(LS_KEY)); if (s && s.projects) store = Object.assign(store, s); } catch (e) { /* fresh */ }
@@ -177,6 +177,143 @@ if (EMBED && EMBED.setupMap) {
   Object.assign(baseLayers, EMBED.setupMap(map));
   baseName = Object.keys(baseLayers)[0];
 } else { baseLayers[baseName].addTo(map); labelsLayer.addTo(map); }
+
+// ======================================================================
+// Sharpest imagery: test several free imagery sources at this site and use the clearest one.
+// Sources: Esri World Imagery, Esri Clarity (archive picked for sharpness), Esri Wayback (older
+// dated releases — sometimes sharper or leaf-off), USGS imagery. Each is checked for the deepest
+// zoom it really has here, then scored for sharpness on the same tile.
+// ======================================================================
+const IMG_SOURCES = [
+  { key: 'esri', name: 'Esri World Imagery (current)', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: 'Imagery © Esri, Maxar, Earthstar Geographics' },
+  { key: 'clarity', name: 'Esri Clarity (sharpest archive)', url: 'https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: 'Imagery © Esri Clarity, Maxar, Earthstar Geographics' },
+  { key: 'usgs', name: 'USGS National Map imagery', url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', attr: 'USGS The National Map' }
+];
+const WAYBACK_CFG = 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json';
+let imgActive = null;   // the imagery source in use when it isn't one of the fixed base layers
+function tileXY(lat, lon, z) {
+  const n = 2 ** z, x = Math.floor((lon + 180) / 360 * n), r = lat * Math.PI / 180;
+  return { x, y: Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n), z };
+}
+const tileUrl = (tpl, t) => tpl.replace('{z}', t.z).replace('{y}', t.y).replace('{x}', t.x);
+async function fetchTile(url, ms = 9000) {
+  const c = new AbortController(), tm = setTimeout(() => c.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: c.signal, mode: 'cors' }); if (!r.ok) return null;
+    const b = await r.blob(); if (!/image/.test(b.type) || b.size < 400) return null;
+    return b;
+  } catch (e) { return null; } finally { clearTimeout(tm); }
+}
+// sharpness (mean |Laplacian|), contrast and a small fingerprint of a tile image
+async function tileStats(blob) {
+  try {
+    const bm = await createImageBitmap(blob), S = 128, cv = document.createElement('canvas'); cv.width = cv.height = S;
+    const ctx = cv.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bm, 0, 0, S, S);
+    const d = ctx.getImageData(0, 0, S, S).data, g = new Float32Array(S * S);
+    let sum = 0; for (let i = 0; i < S * S; i++) { g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]; sum += g[i]; }
+    const mean = sum / (S * S); let v = 0, lap = 0;
+    for (let i = 0; i < S * S; i++) v += (g[i] - mean) ** 2;
+    for (let y = 1; y < S - 1; y++) for (let x = 1; x < S - 1; x++) { const i = y * S + x; lap += Math.abs(4 * g[i] - g[i - 1] - g[i + 1] - g[i - S] - g[i + S]); }
+    const fp = []; for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) fp.push(Math.round(g[(y * 16 + 8) * S + x * 16 + 8] / 16));
+    return { sharp: lap / ((S - 2) * (S - 2)), std: Math.sqrt(v / (S * S)), mean, fp: fp.join(','), size: blob.size };
+  } catch (e) { return null; }
+}
+// A tile is "real" if it loads and isn't the source's blank "no data here" tile
+async function realTile(tpl, t, blank) {
+  const b = await fetchTile(tileUrl(tpl, t)); if (!b) return null;
+  const s = await tileStats(b); if (!s) return null;
+  if (s.std < 4) return null;                                  // flat grey / white placeholder
+  if (blank && (s.fp === blank.fp || Math.abs(s.size - blank.size) < 30 && Math.abs(s.mean - blank.mean) < 2)) return null;
+  return s;
+}
+async function testSource(src, lat, lon) {
+  const ocean = tileXY(-45, -130, 21), blankB = await fetchTile(tileUrl(src.url, ocean)), blank = blankB ? await tileStats(blankB) : null;
+  const t19 = tileXY(lat, lon, 19), s19 = await realTile(src.url, t19, blank);
+  let depth = 0, s18 = null;
+  if (!s19) { s18 = await realTile(src.url, tileXY(lat, lon, 18), blank); if (!s18) { const s17 = await realTile(src.url, tileXY(lat, lon, 17), blank); return Object.assign(src, { ok: !!s17, depth: s17 ? 17 : 0, score: s17 ? s17.sharp * 0.35 : 0, fp: s17 && s17.fp }); } depth = 18; }
+  else { depth = 19; for (const z of [20, 21, 22]) { if (await realTile(src.url, tileXY(lat, lon, z), blank)) depth = z; else break; } }
+  const base = s19 ? s19.sharp : s18.sharp * 0.6;              // a source that stops at 18 is blurrier when zoomed in
+  return Object.assign(src, { ok: true, depth, score: base * (1 + 0.12 * Math.max(0, depth - 19)), fp: (s19 || s18).fp });
+}
+async function waybackSources() {
+  try {
+    const r = await fetch(WAYBACK_CFG); if (!r.ok) return [];
+    const cfg = await r.json();
+    const rel = Object.keys(cfg).map(k => { const it = cfg[k], m = /(\d{4}-\d{2}-\d{2})/.exec(it.itemTitle || ''); return { num: +k, date: m ? m[1] : '', url: (it.itemURL || '').replace('{level}', '{z}').replace('{row}', '{y}').replace('{col}', '{x}') }; })
+      .filter(x => x.url && x.date).sort((a, b) => b.date.localeCompare(a.date));
+    const byYear = {}; rel.forEach(x => { const y = x.date.slice(0, 4); if (!byYear[y]) byYear[y] = x; });   // newest release of each year
+    return Object.values(byYear).sort((a, b) => b.date.localeCompare(a.date)).slice(1, 9)
+      .map(x => ({ key: 'wb' + x.num, name: `Esri Wayback ${x.date}`, date: x.date, url: x.url, attr: `Imagery © Esri World Imagery Wayback (${x.date})` }));
+  } catch (e) { return []; }
+}
+function useImagery(src, quiet) {
+  if (EMBED) { toast('Imagery switching works in the installed app, not this preview'); return; }
+  if (imgActive) { map.removeLayer(imgActive); imgActive = null; }
+  map.removeLayer(baseLayers[baseName]);
+  imgActive = L.tileLayer(src.url, { maxNativeZoom: Math.max(17, src.depth || 19), maxZoom: 22, attribution: src.attr }).addTo(map); imgActive.bringToBack();
+  P.imagery = { key: src.key, name: src.name, url: src.url, attr: src.attr, depth: src.depth || 19 }; save();
+  if (!quiet) toast(`Map imagery: ${src.name}`);
+}
+function restoreImagery() {
+  if (EMBED) return;
+  if (imgActive) { map.removeLayer(imgActive); imgActive = null; }
+  if (P.imagery && P.imagery.url) { if (map.hasLayer(baseLayers[baseName])) map.removeLayer(baseLayers[baseName]); useImagery(P.imagery, true); }
+  else if (!map.hasLayer(baseLayers[baseName])) { baseLayers[baseName].addTo(map); baseLayers[baseName].bringToBack(); }
+}
+function imagerySite() {
+  if (P.boundary && P.boundary.length > 2) { const c = G.polyCentroid(P.boundary.map(xyOf)); return llOf(c[0], c[1]); }
+  if (P.pin) return P.pin;
+  const c = map.getCenter(); return [c.lat, c.lng];
+}
+let imgJob = null;
+async function findBestImagery(show) {
+  if (imgJob) return imgJob;
+  const [lat, lon] = imagerySite();
+  const run = async () => {
+    const card = $('#modalCard');
+    const prog = msg => { if (show) { card.innerHTML = `<h2 style="margin:0 0 6px">Finding the sharpest imagery</h2><div class="muted">${esc(msg)}</div><div class="progress mt"><i style="width:100%" class="indet"></i></div>`; $('#modal').classList.remove('hidden'); } };
+    prog('Checking map sources at this site…');
+    const srcs = IMG_SOURCES.map(s => Object.assign({}, s)).concat(await waybackSources());
+    const out = []; let i = 0;
+    const worker = async () => { while (i < srcs.length) { const s = srcs[i++]; prog(`Testing ${s.name}…`); try { out.push(await testSource(s, lat, lon)); } catch (e) { out.push(Object.assign(s, { ok: false })); } } };
+    await Promise.all([worker(), worker(), worker()]);
+    const seen = new Set(), ranked = out.filter(s => s.ok).sort((a, b) => b.score - a.score).filter(s => { if (seen.has(s.fp)) return false; seen.add(s.fp); return true; });
+    return { ranked, failed: out.filter(s => !s.ok).length, lat, lon };
+  };
+  imgJob = run().finally(() => { imgJob = null; });
+  const res = await imgJob;
+  if (show) imageryResults(res);
+  return res;
+}
+function imageryResults(res) {
+  const card = $('#modalCard'), top = res.ranked[0] ? res.ranked[0].score : 1, cur = P.imagery ? P.imagery.key : 'esri';
+  const stars = s => '★★★★★'.slice(0, Math.max(1, Math.round(5 * s.score / top))) + '☆☆☆☆☆'.slice(0, 5 - Math.max(1, Math.round(5 * s.score / top)));
+  const g = `https://www.google.com/maps/@?api=1&map_action=map&center=${res.lat.toFixed(6)},${res.lon.toFixed(6)}&zoom=20&basemap=satellite`;
+  const bing = `https://www.bing.com/maps?cp=${res.lat.toFixed(6)}~${res.lon.toFixed(6)}&lvl=20&style=a`;
+  card.innerHTML = `<div class="row" style="align-items:center;margin-bottom:6px"><h2 style="margin:0">Imagery at this site</h2><button class="sec" id="imClose" style="flex:0 0 auto">Close</button></div>
+    ${res.ranked.length ? `<p class="muted" style="margin:0 0 8px">Sharpest first. “Detail to zoom” is how far in each source has real photos here (higher is closer).</p>
+    <div class="list">${res.ranked.map((s, i) => `<button class="item imsrc${s.key === cur ? ' on' : ''}" data-im="${i}"><div class="t"><b>${esc(s.name)}${i === 0 ? ' <span class="best">sharpest</span>' : ''}</b><small><span class="stars">${stars(s)}</span> · detail to zoom ${s.depth}${s.key === cur ? ' · in use' : ''}</small></div>${s.key === cur ? '✓' : 'Use'}</button>`).join('')}</div>`
+    : `<div class="warn">Couldn't load any imagery to compare — check the signal and try again.</div>`}
+    ${res.failed ? `<div class="muted mt">${res.failed} source${res.failed > 1 ? 's' : ''} had no imagery here or didn't answer.</div>` : ''}
+    <h3>Compare in another app</h3>
+    <div class="muted" style="margin:-4px 0 6px">Google and Bing imagery can't be used inside SiteWalk, but you can look at this spot in their apps.</div>
+    <div class="row"><a class="btnlink sec" href="${g}" target="_blank" rel="noopener">Google Maps</a><a class="btnlink sec" href="${bing}" target="_blank" rel="noopener">Bing Maps</a></div>
+    <button class="sec mt" id="imReset" style="width:100%">Back to standard Esri imagery</button>`;
+  $('#modal').classList.remove('hidden');
+  $('#imClose').onclick = () => $('#modal').classList.add('hidden');
+  card.querySelectorAll('[data-im]').forEach(b => b.onclick = () => { useImagery(res.ranked[+b.dataset.im]); imageryResults(res); });
+  $('#imReset').onclick = () => { P.imagery = null; save(); restoreImagery(); $('#modal').classList.add('hidden'); toast('Standard imagery'); };
+}
+// After the boundary is set: quietly switch to clearly sharper imagery if there is one
+async function autoBestImagery() {
+  if (EMBED || P.imagery) return;
+  try {
+    const res = await findBestImagery(false), best = res.ranked[0]; if (!best) return;
+    const cur = res.ranked.find(s => s.key === 'esri');
+    if (best.key !== 'esri' && (!cur || best.score > cur.score * 1.15 || best.depth > cur.depth)) { useImagery(best, true); toast(`Switched to sharper imagery here: ${best.name}. Map layers ▤ to change.`, 5000); }
+    else if (cur && cur.depth > 19) useImagery(cur, true);       // Esri has extra detail here — let it zoom in further
+  } catch (e) { /* stay on the standard imagery */ }
+}
 
 const lyr = {
   contours: L.layerGroup(), heat: L.layerGroup().addTo(map), areas: L.layerGroup().addTo(map),
@@ -603,7 +740,7 @@ function areaSummary(a) {
 const draw = { on: false, mode: 'poly', pts: [], cb: null, layer: null };
 function startDraw(mode, cb, msg, opts = {}) {
   Object.assign(draw, { on: true, mode, pts: [], cb, msg: msg || (mode === 'line' ? 'Tap along the line' : mode === 'points' ? 'Tap each one on the map' : 'Tap the map to add corners'), gps: !!opts.gps, noun: opts.noun || (mode === 'line' ? 'point' : mode === 'points' ? 'one' : 'corner'), marking: false, tracing: false, traced: false });
-  $('#dTrace').classList.toggle('hidden', !opts.trace); $('#dTrace').classList.remove('on'); $('#dTrace').textContent = '〰 Trace';
+  $('#dTrace').classList.toggle('hidden', !opts.trace); $('#dTip').classList.add('hidden'); draw.tipKey = null; $('#dTrace').classList.remove('on'); $('#dTrace').textContent = '〰 Trace';
   $('#drawBar').classList.remove('hidden'); document.body.classList.add('drawing');
   map.doubleClickZoom.disable();   // quick taps add corners instead of zooming
   $('#dMark').classList.toggle('hidden', !draw.gps);
@@ -622,6 +759,7 @@ fixListeners.add(f => {
   }
   if (draw.gps) updateDrawSub();
 });
+$('#dTip').onclick = () => { if (draw.tipKey) showTip(draw.tipKey, { force: true }); };
 $('#dTrace').onclick = () => {
   draw.tracing = !draw.tracing; $('#dTrace').classList.toggle('on', draw.tracing);
   $('#dTrace').textContent = draw.tracing ? '■ Stop' : '〰 Trace';
@@ -850,13 +988,16 @@ $('#btnLocate').onclick = async () => { const f = await locateOnce(); if (!needF
 $('#btnContours').onclick = toggleContours;
 $('#btnAddFeat').onclick = () => openAddMenu($('#btnAddFeat'));
 $('#btnLayers').onclick = async () => {
-  const v = await form('Map layers', [
+  const pending = form('Map layers', [
     { key: 'base', label: 'Base map', type: 'select', value: baseName, options: Object.keys(baseLayers) },
     ...(EMBED ? [] : [{ key: 'labels', label: 'Road & place labels (hybrid)', type: 'select', value: map.hasLayer(labelsLayer) ? 'on' : 'off', options: [['on', 'Show'], ['off', 'Hide']] }]),
     { key: 'ci', label: 'Contour interval (ft)', type: 'select', value: P.factors.contourFt, options: [0.5, 1, 2, 5, 10] }
-  ], 'Apply', `<label>Map labels</label><div class="mapkey"><div><span class="kc">415</span>Contour elevation, ft (orange, along the line)</div><div><span class="kd">202.6 ft</span>Boundary length (white tag)</div><div><span class="kf">Well</span>Feature or area name (dark tag)</div></div>`);
+  ], 'Apply', `${EMBED ? '' : `<div class="muted" style="margin-top:8px">Imagery in use: <b>${esc(P.imagery ? P.imagery.name : 'Esri World Imagery (standard)')}</b></div><button class="pri mt" id="imgFind" type="button" style="width:100%">🔍 Find the sharpest imagery here</button>`}<button class="sec mt" id="parcelBtn" type="button" style="width:100%">🗺 Tax parcel map…</button><label>Map labels</label><div class="mapkey"><div><span class="kc">415</span>Contour elevation, ft (orange, along the line)</div><div><span class="kd">202.6 ft</span>Boundary length (white tag)</div><div><span class="kf">Well</span>Feature or area name (dark tag)</div></div>`);
+  if ($('#imgFind')) $('#imgFind').onclick = () => findBestImagery(true);
+  $('#parcelBtn').onclick = () => parcelDialog();
+  const v = await pending;
   if (!v) return;
-  map.removeLayer(baseLayers[baseName]); baseName = v.base; baseLayers[baseName].addTo(map); baseLayers[baseName].bringToBack();
+  if (v.base !== baseName || P.imagery) { if (imgActive) { map.removeLayer(imgActive); imgActive = null; P.imagery = null; } map.removeLayer(baseLayers[baseName]); baseName = v.base; baseLayers[baseName].addTo(map); baseLayers[baseName].bringToBack(); }
   if (v.labels === 'on') labelsLayer.addTo(map); else map.removeLayer(labelsLayer);
   P.factors.contourFt = parseFloat(v.ci); save(); if (contoursOn) drawContours();
 };
@@ -1157,7 +1298,7 @@ function switchProject(id) {
   migrateLines(P); P.lines = P.lines || [];
   ui.areaId = null; ui.lineId = null; calcCache.clear(); save(true);
   if (P.view) map.setView(P.view.c, P.view.z);
-  refreshMap(); render();
+  restoreImagery(); refreshMap(); render();
 }
 function refreshMap() {
   drawWalks(); drawShots(); drawPin(); redrawAreas(); drawBoundary(); drawTrees(); drawFeatures();
@@ -1188,6 +1329,8 @@ function bind() {
   all('[data-f]', e => { const v = parseFloat(e.value); if (isFinite(v)) { P.factors[e.dataset.f] = v; calcCache.clear(); save(); } }, 'change');
   on('#fitAll', fitAll);
   on('#bSet', () => setupBoundary());
+  on('#bFind', () => { if (P.boundary && P.boundary.length > 2) startCornerFind(P.boundary.slice(), 'Property line'); });
+  on('#bTax', () => parcelDialog());
   on('#bEdit', () => { ui.editBnd = !ui.editBnd; editVerts = ui.editBnd; if (editVerts) { showVerts({ pts: P.boundary, geom: 'poly' }); $('#sheet').classList.add('collapsed'); } else lyr.verts.clearLayers(); render(); });
   on('#bClear', async () => { if (await confirmBox('Remove the property line?', 'Remove')) { P.boundary = null; ui.editBnd = false; lyr.verts.clearLayers(); save(); drawBoundary(); render(); } });
   on('#bPlan', planDialog);
@@ -1280,7 +1423,9 @@ function bndHtml() {
     <div class="row mt"><button class="sec" id="bSet">Set property line</button><button class="sec" id="bPlan">📐 Site plan</button></div>`;
   const xy = b.map(xyOf), A = G.polyArea(xy), per = courses(xy).reduce((s, c) => s + c.dist, 0);
   return `<div class="stats"><div class="stat"><b>${num(A / G.SF_PER_ACRE, 3)}</b><span>Acres</span></div><div class="stat"><b>${num(per)}</b><span>Perimeter ft</span></div><div class="stat"><b>${b.length}</b><span>Corners</span></div></div>
-    <div class="row"><button class="sec" id="bEdit">${ui.editBnd ? 'Done editing' : 'Edit corners'}</button><button class="sec" id="bSet">Redraw</button><button class="dng" id="bClear" style="flex:0 0 auto">✕</button></div>
+    <div class="row"><button class="sec" id="bFind">📍 Find corners</button><button class="sec" id="bTax">🗺 Tax map</button></div>
+    ${P.boundarySrc ? `<div class="muted" style="margin:4px 0">From: ${esc(P.boundarySrc)}</div>` : ''}
+    <div class="row mt"><button class="sec" id="bEdit">${ui.editBnd ? 'Done editing' : 'Edit corners'}</button><button class="sec" id="bSet">Redraw</button><button class="dng" id="bClear" style="flex:0 0 auto">✕</button></div>
     <button class="pri big mt" id="bPlan" style="width:100%">📐 Site plan drawing</button>`;
 }
 function boundaryFromWalk(w) {
@@ -1834,7 +1979,7 @@ async function afterBoundary() {
   render();
   if (!P.surface || !G.covers(P.surface, xy)) { setTab('site'); await buildSurface(); }
   if (P.surface && !contoursOn) toggleContours();
-  ui.flow = false; flowCheck();
+  ui.flow = false; flowCheck(); setTimeout(autoBestImagery, 1500);
   toast(`Boundary set · ${num(A / G.SF_PER_ACRE, 2)} ac · ${num(per)} ft around${P.surface ? ' · contours on' : ''}`, 4000);
   openTakeoffEntry();
 }
@@ -1876,7 +2021,20 @@ $('#flowGo').onclick = async () => {
   const k = await choiceBox('Mark the area / property boundary', 'How do you want to mark it?', [
     ['corners', '📍 Click corners', 'Walk to each corner and tap Mark corner, or tap the corners on the map.'],
     ['trace', '👣 Have the app trace my steps', 'Walk the line and the app follows your phone, then straightens it out.'],
+    ['parcel', '🗺 Use the county tax map', 'Tap your lot on the tax map, then walk to the corners to check them.'],
     ['cancel', 'Cancel', '']]);
+  if (k === 'parcel') {
+    const go = () => { store.parcelShow = true; save(true); ui.flow = false; flowCheck(); map.setZoom(Math.max(map.getZoom(), 17)); drawParcels(); toast('Tap your lot on the map', 4000); };
+    if (parcelSrc().type === 'none') parcelDialog(go); else go();
+    return;
+  }
+  if (k === 'corners' || k === 'trace') {
+    const bk = 'boundary-' + k;
+    TIPS[bk] = k === 'corners'
+      ? { title: 'Boundary — click corners', mark: 'Walk to each property corner (pin, fence corner or best guess) and tap <b>Mark corner</b>.', how: ['Go around in order — clockwise or counter-clockwise, don’t skip back and forth.', 'Can’t get to a corner? Tap it on the map instead.', 'Tap <b>Done</b> after the last corner — the app closes the shape.'], ex: '' }
+      : { title: 'Boundary — trace my steps', mark: 'Walk the property line all the way around and finish where you started.', how: ['The app follows your phone and straightens the GPS wiggle.', 'Tap <b>Finish trace</b> when you’re back at the start.', 'Best for curved lines, creeks and wooded edges.'], ex: '' };
+    if (!(await showTip(bk, { okText: 'Start', cancel: true }))) { flowCheck(); return; }
+  }
   if (k === 'corners') startDraw('poly', pts => { P.boundary = pts; afterBoundary(); }, 'Walk to a corner and tap Mark corner, or tap the corners on the map', { gps: true, noun: 'corner' });
   else if (k === 'trace') traceBoundary();
   flowCheck();
@@ -2839,6 +2997,315 @@ function openLine(id) {
   $('#sheet').classList.remove('collapsed', 'full');
   drawLines(); render();
 }
+// ======================================================================
+// Field tips: what the app is looking for when you lay out each kind of work
+// ======================================================================
+const TIPS = {
+  trench: { unit: 'LF', title: 'Utility trench — measured in LF (length)', mark: 'Walk the trench route from start to end.',
+    how: ['Tap <b>Mark</b> at the start, at every bend, and at the end — or tap <b>〰 Trace</b> and just walk it.', 'Several runs can go on one item (meter to house, house to septic) — tap 📏 again to add a run.', 'Depth is set on the item (24" to start). Pipe and wire are by others unless you add a material price.'],
+    ex: '180 LF water line from the meter to the house.' },
+  'stone-line': { unit: 'LF', title: 'Driveway stone — LF along the centerline', mark: 'Walk down the <b>middle</b> of the driveway, start to end.',
+    how: ['The app figures length × width (12 ft to start) × depth (6") and turns it into tons of stone.', 'Use <b>Area</b> instead for parking pads, turnarounds or odd shapes.', 'Change width, depth, compaction and tons per CY on the item.'],
+    ex: '250 LF × 12 ft × 6" ≈ 66 tons of crusher run.' },
+  'stone-poly': { unit: 'SF', title: 'Stone pad — Area (outline)', mark: 'Walk or tap around the <b>outside edge</b> of the stone area.',
+    how: ['The app figures area × depth and turns it into tons.', 'For a driveway, a centerline (LF) is usually quicker — the width is added for you.'], ex: '40 × 60 ft parking pad at 6" ≈ 66 tons.' },
+  pad: { unit: 'house corners', title: 'Building pad — mark the HOUSE corners', mark: 'Mark the corners of the <b>house itself</b> — not the pad edge.',
+    how: ['The app adds 6 ft around the house for the pad and slopes the sides 3:1 down (or up) to existing ground.', 'Next it asks for the <b>finish slab elevation</b> and figures cut and fill from the USGS ground data.', 'Walk to each corner and tap Mark, or tap the corners on the map. 4 corners is fine for a simple rectangle.'],
+    ex: '40 × 60 ft house → pad about 52 × 72 ft plus slopes.' },
+  clear: { unit: 'acres', title: 'Clearing — Area (acres)', mark: 'Walk or tap around the <b>outside edge</b> of the area to clear.',
+    how: ['Pick light, medium or heavy woods on the item — that sets the price per acre and the debris truckloads.', 'For a few scattered trees, use <b>Count</b> and mark each tree instead.', 'Trees are pushed over and dug out — no stump grinding.'],
+    ex: 'House site and yard, about 0.4 acre of medium woods.' },
+  trees: { unit: 'EA', title: 'Tree removal — Count (each)', mark: 'Stand at each tree and tap <b>Mark</b>, or tap it on the map.',
+    how: ['Pick the size class when you add the item: under 12", 12–24", or over 24" trunk.', 'Use one item per size class.', 'For a whole stand of trees, use Clear & grub by area instead.'], ex: '6 trees 12–24".' },
+  grade: { unit: 'SF', title: 'Grading — Area (outline)', mark: 'Outline the area you will grade.',
+    how: ['The app uses the USGS ground elevations to figure cut and fill to a finish elevation.', 'Auto-balance picks the elevation where the cut covers the fill.'], ex: 'Yard behind the house leveled to 1,385 ft.' },
+  topsoil: { unit: 'SF × depth', title: 'Topsoil — Area × depth', mark: 'Walk or tap around the area.', how: ['Set the depth on the item (6" strip, 4" respread). CY = area × depth.'], ex: '8,000 SF stripped 6" ≈ 148 CY.' },
+  seed: { unit: '1,000 SF', title: 'Seed & straw — Area', mark: 'Walk or tap around the area to seed and straw.', how: ['Priced per 1,000 SF for seed, fertilizer, lime and straw.', 'Building pad side slopes are seeded automatically — don’t mark them again.'], ex: '12,000 SF of disturbed yard.' },
+  silt: { unit: 'LF', title: 'Silt fence — LF', mark: 'Walk the line where the fence goes.', how: ['Usually along the low side of the work, above any creek or ditch.'], ex: '300 LF along the downhill property line.' },
+  demo: { unit: 'SF', title: 'Demolition — Area of the structure', mark: 'Tap the corners of the building’s <b>footprint</b>.', how: ['Priced per SF of footprint, with debris truckloads added.', 'For a small item (well house, slab, pool), an allowance (lump sum) may be easier.'], ex: '16 × 20 ft shed = 320 SF.' },
+  pave: { unit: 'SF', title: 'Remove paving — Area', mark: 'Walk or tap around the paving to remove.', how: ['Priced per SF with haul-off loads added.'], ex: 'Old asphalt drive 10 × 120 ft = 1,200 SF.' },
+  fenceRm: { unit: 'LF', title: 'Remove fence — LF', mark: 'Walk the fence from end to end, tapping Mark at each corner.', how: ['Several runs can go on one item.'], ex: '400 LF of wire fence.' },
+  plant: { unit: 'EA', title: 'Plant trees — Count', mark: 'Tap where each tree goes.', how: ['Set the price per tree as the material.'], ex: '4 trees along the drive.' },
+  'custom-lf': { unit: 'LF', title: 'Length (LF)', mark: 'Walk it from start to end.', how: ['Tap <b>Mark</b> at the start, at each bend and at the end — or use <b>〰 Trace</b> and walk it.', 'You can also tap it on the map.'], ex: '' },
+  'custom-poly': { unit: 'SF', title: 'Area (outline)', mark: 'Walk or tap around the <b>outside edge</b>.', how: ['Mark each corner; the app closes the shape for you.', 'Use 〰 Trace for curved edges.'], ex: '' },
+  'custom-points': { unit: 'EA', title: 'Count (each)', mark: 'Mark each one.', how: ['Stand at it and tap Mark, or tap it on the map.'], ex: '' }
+};
+const GPS_TIPS = ['Wait for the GPS badge to turn <b>green</b> (±16 ft or better) before marking. Yellow is OK, red is rough.', 'Hold still for 3 seconds when you tap <b>Mark</b> — the app averages the position.', 'Heavy trees and buildings weaken GPS. Step into the open, or tap the point on the map instead.', 'Keep the screen on while walking — phones pause GPS when the screen locks.', 'Photos and GPS can be off by a few feet. For pricing that’s fine; it’s not a survey.'];
+const TIP_ITEM = { trench: 'trench', pad: 'pad', clearL: 'clear', clearM: 'clear', clearH: 'clear', treeS: 'trees', treeM: 'trees', treeL: 'trees', demo: 'demo', pave: 'pave', fenceRm: 'fenceRm', grade: 'grade', strip: 'topsoil', respread: 'topsoil', seed: 'seed', silt: 'silt', plant: 'plant' };
+function tipKeyFor(item, calc, geom) {
+  if (item === 'stone' || calc === 'stone') return geom === 'poly' ? 'stone-poly' : 'stone-line';
+  const k = TIP_ITEM[item];
+  if (k === 'clear' && geom === 'points') return 'trees';
+  if (k === 'trees' && geom === 'poly') return 'clear';
+  if (k) { const g = TIPS[k]; const want = g.unit === 'LF' ? 'line' : g.unit === 'EA' ? 'points' : 'poly'; if (k === 'pad' || want === geom) return k; }
+  return 'custom-' + (geom || 'line');
+}
+function tipCard(key, mismatch) {
+  const t = TIPS[key]; if (!t) return '';
+  return `<div class="tipcard"><div class="tiphead">💡 ${esc(t.title)}</div><div>${t.mark}</div>${mismatch ? `<div class="tipwarn">${mismatch}</div>` : ''}<button class="tipmore" type="button" data-tip="${key}">More tips</button></div>`;
+}
+function showTip(key, opts = {}) {
+  return new Promise(resolve => {
+    const t = TIPS[key]; if (!t) return resolve(true);
+    store.tipsSeen = store.tipsSeen || {};
+    if (!opts.force && (store.tipsSeen[key] || store.tipsOff)) return resolve(true);
+    const card = $('#modalCard'); card.classList.remove('wide');
+    card.innerHTML = `<h2 style="margin:0 0 6px">💡 ${esc(t.title)}</h2>
+      <div class="tipmark">${t.mark}</div>
+      <ul class="tiplist">${t.how.map(h => `<li>${h}</li>`).join('')}</ul>
+      ${t.ex ? `<div class="muted">Example: ${esc(t.ex)}</div>` : ''}
+      ${opts.gps === false ? '' : `<details class="mt"><summary>GPS tips</summary><ul class="tiplist">${GPS_TIPS.map(h => `<li>${h}</li>`).join('')}</ul></details>`}
+      ${opts.force ? '' : '<label class="xrow" style="margin-top:10px"><input type="checkbox" id="tipNo"><span><b>Don’t show this tip again</b><small>Tips stay under 💡 Tips on the Takeoff tab</small></span></label>'}
+      <div class="row" style="margin-top:14px">${opts.cancel ? '<button class="sec" id="tipCancel" type="button">Cancel</button>' : ''}<button class="pri" id="tipOk" type="button">${opts.okText || 'Got it'}</button></div>`;
+    $('#modal').classList.remove('hidden');
+    $('#tipOk').onclick = () => { if ($('#tipNo') && $('#tipNo').checked) { store.tipsSeen[key] = true; save(true); } $('#modal').classList.add('hidden'); resolve(true); };
+    if ($('#tipCancel')) $('#tipCancel').onclick = () => { $('#modal').classList.add('hidden'); resolve(false); };
+  });
+}
+function tipsDialog() {
+  const card = $('#modalCard'); card.classList.remove('wide');
+  const order = ['trench', 'stone-line', 'stone-poly', 'pad', 'clear', 'trees', 'grade', 'topsoil', 'seed', 'silt', 'demo', 'pave', 'fenceRm', 'plant'];
+  card.innerHTML = `<div class="row" style="align-items:center;margin-bottom:6px"><h2 style="margin:0">💡 Tips</h2><button class="sec" id="tdClose" style="flex:0 0 auto">Close</button></div>
+    <p class="muted" style="margin:0 0 8px">What to mark on the map for each kind of work.</p>
+    <details open><summary><b>LF, SF or count — which one?</b></summary><ul class="tiplist">
+      <li><b>LF (length)</b> — things you walk along: trenches, driveways (centerline), silt fence, fence removal.</li>
+      <li><b>Area (SF / acres)</b> — things you walk around: clearing, grading, seeding, topsoil, demolition, parking pads.</li>
+      <li><b>Count (EA)</b> — things you stand at: individual trees, plantings.</li>
+      <li><b>Building pad</b> — mark the house corners; the app adds the pad and slopes.</li></ul></details>
+    ${order.map(k => `<details><summary>${esc(TIPS[k].title)}</summary><div class="tipmark">${TIPS[k].mark}</div><ul class="tiplist">${TIPS[k].how.map(h => `<li>${h}</li>`).join('')}</ul>${TIPS[k].ex ? `<div class="muted">Example: ${esc(TIPS[k].ex)}</div>` : ''}</details>`).join('')}
+    <details><summary>GPS tips</summary><ul class="tiplist">${GPS_TIPS.map(h => `<li>${h}</li>`).join('')}</ul></details>
+    <div class="row mt"><button class="sec" id="tdReset">Show tips again when marking</button></div>
+    <label class="xrow mt"><input type="checkbox" id="tdOff" ${store.tipsOff ? 'checked' : ''}><span><b>Turn off tip pop-ups</b><small>Tips still show on the Takeoff screen and here</small></span></label>`;
+  $('#modal').classList.remove('hidden');
+  $('#tdClose').onclick = () => $('#modal').classList.add('hidden');
+  $('#tdReset').onclick = () => { store.tipsSeen = {}; store.tipsOff = false; save(true); $('#tdOff').checked = false; toast('Tips will show again'); };
+  $('#tdOff').onchange = e => { store.tipsOff = e.target.checked; save(true); };
+}
+
+// ======================================================================
+// County tax parcels: show the tax map, use a parcel as the boundary, then walk to its corners.
+// Sources: a county's free online parcel layer (ArcGIS), or a parcel file you import
+// (zipped shapefile, GeoJSON or KML) — e.g. the shapefile bought from Lumpkin County GIS.
+// Tax maps are approximate (often off 10–50 ft) — they help you find pins, they aren't a survey.
+// ======================================================================
+const PARCEL_COUNTIES = [
+  ['Cherokee', 'https://gis.cherokeecountyga.gov/arcgis/rest/services/MainLayers/MapServer/1'],
+  ['Forsyth', 'https://geo.forsythco.com/gis/rest/services/Public/Tax_Parcel/FeatureServer/0'],
+  ['Hall', 'https://hallgis.hallcounty.org/arcgis/rest/services/GeneralTab/MapServer/1'],
+  ['Bibb', 'https://services2.arcgis.com/zPFLSOZ5HzUzzTQb/arcgis/rest/services/ParcelCAMA_Current_2025/FeatureServer/0'],
+  ['Chatham', 'https://pub.sagis.org/arcgis/rest/services/OpenData/Parcels/MapServer/27'],
+  ['Clarke', 'https://enigma.accgov.com/server/rest/services/ACC_Parcels/FeatureServer/0'],
+  ['Clayton', 'https://gis.claytoncountyga.gov/server/rest/services/TaxAssessor/Parcels/MapServer/0'],
+  ['Cobb', 'https://gis.cobbcounty.gov/gisserver/rest/services/tax/taxassessorsdaily/MapServer/0'],
+  ['Columbia', 'https://gis.columbiacountyga.gov/host/rest/services/PublicAccess/LandData/MapServer/1003'],
+  ['Coweta', 'https://services1.arcgis.com/AaPyNbrJpNGryRqh/arcgis/rest/services/WeeklyUpdate_WinGapParcels/FeatureServer/0'],
+  ['DeKalb', 'https://dcgis.dekalbcountyga.gov/hosted/rest/services/Tax_Parcels/FeatureServer/0'],
+  ['Douglas', 'https://maps.douglascountyga.gov/arcgis/rest/services/CountyLayers/Parcels/MapServer/15'],
+  ['Fayette', 'https://services5.arcgis.com/Hg5aLg4LtSINzVWa/arcgis/rest/services/Parcels_Data_SAGES/FeatureServer/0'],
+  ['Fulton', 'https://services1.arcgis.com/AQDHTHDrZzfsFsB5/arcgis/rest/services/Tax_Parcels/FeatureServer/0'],
+  ['Muscogee', 'https://services2.arcgis.com/hKwZvjnqryeqGRIt/arcgis/rest/services/Tax_Parcels/FeatureServer/302'],
+  ['Paulding', 'https://services8.arcgis.com/7YXQzPPGs9Uc4qKl/arcgis/rest/services/Paulding_Map_Auto_Updated_WFL3/FeatureServer/25'],
+  ['Richmond', 'https://gismap.augustaga.gov/arcgis/rest/services/AGOL/AGSGeneralFeatures/MapServer/32']
+];
+const QPUBLIC_LUMPKIN = 'https://qpublic.schneidercorp.com/Application.aspx?App=LumpkinCountyGA';
+map.createPane('parcelPane'); map.getPane('parcelPane').style.zIndex = 395;
+lyr.parcels = L.layerGroup().addTo(map);
+lyr.corners = L.layerGroup().addTo(map);
+const parcelSrc = () => store.parcelSrc || { type: 'none' };
+let parcelFile = null, parcelCache = { key: '', feats: [] }, parcelT = null;
+// --- IndexedDB for an imported county file (too big for normal storage)
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open('sitewalk', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbSet(k, v) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); }
+async function idbGet(k) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction('kv'); const q = t.objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+// GeoJSON → our parcel list: outer ring as [lat, lon], attributes, bounding box
+function featsFromGeoJSON(gj) {
+  const out = [], fcs = Array.isArray(gj) ? gj : [gj];
+  const r7 = v => Math.round(v * 1e7) / 1e7;
+  fcs.forEach(fc => (fc.features || (fc.type === 'Feature' ? [fc] : [])).forEach(f => {
+    const g = f.geometry; if (!g) return;
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+    polys.forEach(pg => {
+      const ring = (pg[0] || []).map(c => [r7(c[1]), r7(c[0])]); if (ring.length < 4) return;
+      if (Math.abs(ring[0][0]) > 90 || Math.abs(ring[0][1]) > 180) return;      // not lat/lon — projection missing
+      let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; ring.forEach(([la, lo]) => { a = Math.min(a, la); b = Math.min(b, lo); c = Math.max(c, la); d = Math.max(d, lo); });
+      out.push({ g: ring, a: f.properties || {}, bb: [a, b, c, d] });
+    });
+  }));
+  return out;
+}
+function featsFromKML(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml'), out = [];
+  doc.querySelectorAll('Placemark').forEach(pm => {
+    const a = { name: (pm.querySelector('name') || {}).textContent || '' };
+    pm.querySelectorAll('ExtendedData Data').forEach(d => { const v = d.querySelector('value'); a[d.getAttribute('name')] = v ? v.textContent : ''; });
+    pm.querySelectorAll('Polygon outerBoundaryIs coordinates, Polygon > outerBoundaryIs coordinates').forEach(c => {
+      const coords = c.textContent.trim().split(/\s+/).map(s => s.split(',').map(Number)).filter(p => p.length >= 2 && isFinite(p[0]));
+      out.push(...featsFromGeoJSON({ type: 'Feature', properties: a, geometry: { type: 'Polygon', coordinates: [coords] } }));
+    });
+  });
+  return out;
+}
+function loadScript(src) { return new Promise((res, rej) => { if (window.shp) return res(); const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load the shapefile reader')); document.head.appendChild(s); }); }
+async function importParcelFile(file) {
+  const name = file.name.toLowerCase(); let feats = [];
+  toast('Reading the parcel file…', 4000);
+  if (name.endsWith('.zip')) { await loadScript('lib/shp.min.js'); feats = featsFromGeoJSON(await window.shp(await file.arrayBuffer())); }
+  else if (name.endsWith('.kml')) feats = featsFromKML(await file.text());
+  else feats = featsFromGeoJSON(JSON.parse(await file.text()));
+  if (!feats.length) throw new Error('No parcel outlines found. Use a zipped shapefile (with its .prj), GeoJSON or KML.');
+  parcelFile = { name: file.name, feats };
+  await idbSet('parcelFile', parcelFile);
+  store.parcelSrc = { type: 'file', name: file.name, count: feats.length }; save(true);
+  return feats.length;
+}
+// --- ArcGIS county layer: parcels in the current view
+async function fetchServiceParcels(url, b) {
+  const env = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+  const q = `${url.replace(/\/+$/, '')}/query?where=1%3D1&geometry=${encodeURIComponent(env)}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=true&outSR=4326&resultRecordCount=1500`;
+  try { const r = await fetch(q + '&f=geojson'); if (r.ok) { const j = await r.json(); if (j && j.features) return featsFromGeoJSON(j); } } catch (e) { /* try esri json */ }
+  const r = await fetch(q + '&f=json'); if (!r.ok) throw new Error('The county map didn’t answer');
+  const j = await r.json(); if (j.error) throw new Error(j.error.message || 'The county map refused the request');
+  return featsFromGeoJSON({ type: 'FeatureCollection', features: (j.features || []).map(f => ({ type: 'Feature', properties: f.attributes, geometry: { type: 'Polygon', coordinates: f.geometry && f.geometry.rings ? [f.geometry.rings[0]] : [] } })) });
+}
+async function parcelsInView() {
+  const src = parcelSrc(), b = map.getBounds();
+  if (src.type === 'file') {
+    if (!parcelFile) parcelFile = await idbGet('parcelFile').catch(() => null);
+    if (!parcelFile) return [];
+    const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
+    return parcelFile.feats.filter(f => f.bb[2] >= s && f.bb[0] <= n && f.bb[3] >= w && f.bb[1] <= e).slice(0, 2500);
+  }
+  if (src.type === 'service' && src.url) {
+    const key = src.url + '|' + b.pad(0.3).toBBoxString();
+    if (parcelCache.key && parcelCache.bounds && parcelCache.bounds.contains(b) && parcelCache.url === src.url) return parcelCache.feats;
+    const big = b.pad(0.3), feats = await fetchServiceParcels(src.url, big);
+    parcelCache = { key, url: src.url, bounds: big, feats }; return feats;
+  }
+  return [];
+}
+function parcelInfo(a) {
+  const pick = re => { const k = Object.keys(a).find(k => re.test(k) && a[k] != null && String(a[k]).trim() !== ''); return k ? String(a[k]).trim() : ''; };
+  return { id: pick(/^(parcel|parcel_?id|pin|parid|apn|parcelno|parcel_no|mapno|map_no|tax_?id|name)$/i) || pick(/parcel|pin|parid|apn/i), owner: pick(/owner|own1|ownername/i), addr: pick(/situs|site_?addr|location|address|prop_?addr/i), acres: pick(/acre/i) };
+}
+async function drawParcels() {
+  lyr.parcels.clearLayers();
+  if (!store.parcelShow || parcelSrc().type === 'none' || map.getZoom() < 15) return;
+  let feats = [];
+  try { feats = await parcelsInView(); } catch (e) { toast('Tax map: ' + (e.message || 'could not load'), 4000); return; }
+  feats.forEach(f => {
+    const pg = L.polygon(f.g, { pane: 'parcelPane', color: '#ffd400', weight: 1.6, opacity: 0.95, fillColor: '#ffd400', fillOpacity: 0.02, className: 'parcel' }).addTo(lyr.parcels);
+    pg.on('click', e => { if (mapCapturing()) { map.fire('click', { latlng: e.latlng }); return; } L.DomEvent.stopPropagation(e); parcelPopup(f, e.latlng); });
+  });
+}
+map.on('moveend', () => { clearTimeout(parcelT); parcelT = setTimeout(drawParcels, 350); });
+function parcelPopup(f, ll) {
+  const inf = parcelInfo(f.a), xy = f.g.map(xyOf), ac = G.polyArea(xy) / G.SF_PER_ACRE;
+  const el = document.createElement('div'); el.className = 'ppop';
+  el.innerHTML = `<b>${esc(inf.id || 'Tax parcel')}</b>${inf.owner ? `<div>${esc(inf.owner)}</div>` : ''}${inf.addr ? `<div>${esc(inf.addr)}</div>` : ''}
+    <div class="muted">${num(ac, 2)} ac by the map${inf.acres ? ` · ${esc(inf.acres)} ac on record` : ''} · ${parcelCorners(f.g).length} corners</div>
+    <button class="pri" data-pp="bnd">Use as property boundary</button><button class="sec" data-pp="find">📍 Find the corners</button>`;
+  const pop = L.popup({ maxWidth: 260 }).setLatLng(ll).setContent(el).openOn(map);
+  el.querySelector('[data-pp=bnd]').onclick = () => { map.closePopup(pop); useParcelBoundary(f, inf); };
+  el.querySelector('[data-pp=find]').onclick = () => { map.closePopup(pop); startCornerFind(parcelCorners(f.g), inf.id || 'Tax parcel'); };
+}
+function parcelCorners(ring) {
+  let pts = ring.slice(); const a = pts[0], b = pts[pts.length - 1]; if (a[0] === b[0] && a[1] === b[1]) pts.pop();
+  if (!P.origin) P.origin = { lat0: pts[0][0], lon0: pts[0][1] };
+  const xy = G.simplify(pts.map(xyOf).concat([xyOf(pts[0])]), 2).slice(0, -1);
+  return (xy.length >= 3 ? xy : pts.map(xyOf)).map(([x, y]) => llOf(x, y));
+}
+function useParcelBoundary(f, inf) {
+  P.boundary = parcelCorners(f.g); P.boundarySrc = 'tax map' + (inf && inf.id ? ' ' + inf.id : '');
+  if (!P.address && inf && inf.addr) P.address = inf.addr;
+  save(); ui.flow = false; flowCheck(); afterBoundary();
+  setTimeout(() => toast('Boundary from the tax map. Tax maps can be off 10–50 ft — use 📍 Find corners to walk to the pins.', 6000), 4500);
+}
+// --- Corner finder: distance and direction from where you're standing to each corner
+const cf = { on: false, pts: [], sel: 0, name: '', found: {} };
+function startCornerFind(pts, name) {
+  Object.assign(cf, { on: true, pts, sel: 0, name, found: {} });
+  startGPS(); follow = false; $('#sheet').classList.add('collapsed');
+  $('#cornerBar').classList.remove('hidden'); document.body.classList.add('cornering');
+  drawCorners(); updateCornerBar(); map.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: 20 });
+}
+function stopCornerFind() { cf.on = false; lyr.corners.clearLayers(); $('#cornerBar').classList.add('hidden'); document.body.classList.remove('cornering'); $('#sheet').classList.remove('collapsed'); render(); }
+function drawCorners() {
+  lyr.corners.clearLayers(); if (!cf.on) return;
+  cf.pts.forEach((p, i) => {
+    const f = cf.found[i], sel = i === cf.sel;
+    L.marker(p, { icon: L.divIcon({ className: 'cfpin' + (sel ? ' sel' : '') + (f ? ' found' : ''), iconSize: [26, 26], html: String(i + 1) }) }).addTo(lyr.corners).on('click', e => { L.DomEvent.stopPropagation(e); cf.sel = i; drawCorners(); updateCornerBar(); });
+    if (f) L.circleMarker([f.lat, f.lon], { radius: 6, color: '#fff', weight: 2, fillColor: '#188038', fillOpacity: 1 }).addTo(lyr.corners);
+  });
+  if (lastFix) L.polyline([[lastFix.lat, lastFix.lon], cf.pts[cf.sel]], { color: '#ffd400', weight: 3, dashArray: '6 6', interactive: false }).addTo(lyr.corners);
+}
+function updateCornerBar() {
+  if (!cf.on) return;
+  const p = cf.pts[cf.sel], f = lastFix, nf = Object.keys(cf.found).length;
+  let dist = '—', dir = 'Waiting for GPS…', arrow = 0;
+  if (f) { const [dx, dy] = G.toXY(p[0], p[1], { lat0: f.lat, lon0: f.lon }); const d = Math.hypot(dx, dy); arrow = Math.atan2(dx, dy) * 180 / Math.PI; dist = d < 3 ? 'Here' : num(d) + ' ft'; dir = d < 3 ? 'You’re at the corner (within GPS accuracy)' : `${['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((arrow + 360) % 360) / 45) % 8]} · ${bearingText(dx, dy)} · GPS ±${Math.round(f.acc)} ft`; }
+  $('#cfTitle').textContent = `Corner ${cf.sel + 1} of ${cf.pts.length}${cf.found[cf.sel] ? ' ✓ found' : ''}`;
+  $('#cfDist').textContent = dist; $('#cfDir').textContent = dir; $('#cfArrow').style.transform = `rotate(${arrow}deg)`; $('#cfArrow').style.visibility = f ? 'visible' : 'hidden';
+  $('#cfUse').classList.toggle('hidden', !nf); $('#cfUse').textContent = `Use found corners (${nf})`;
+}
+fixListeners.add(() => { if (cf.on) { updateCornerBar(); drawCorners(); } });
+$('#cfPrev').onclick = () => { cf.sel = (cf.sel - 1 + cf.pts.length) % cf.pts.length; drawCorners(); updateCornerBar(); };
+$('#cfNext').onclick = () => { cf.sel = (cf.sel + 1) % cf.pts.length; drawCorners(); updateCornerBar(); };
+$('#cfDone').onclick = stopCornerFind;
+$('#cfHelp').onclick = () => showTip('corners', { force: true });
+$('#cfMark').onclick = async () => {
+  const b = $('#cfMark'); b.disabled = true; b.textContent = 'Hold still… averaging GPS';
+  const f = await averageFix(3000); b.disabled = false; b.textContent = '📍 Found it — mark here';
+  if (!needFix(f)) return;
+  cf.found[cf.sel] = { lat: f.lat, lon: f.lon, acc: f.acc };
+  const [dx, dy] = G.toXY(f.lat, f.lon, { lat0: cf.pts[cf.sel][0], lon0: cf.pts[cf.sel][1] });
+  toast(`Corner ${cf.sel + 1} marked (±${Math.round(f.acc)} ft) — ${num(Math.hypot(dx, dy))} ft from the tax map`, 4000);
+  if (Object.keys(cf.found).length < cf.pts.length) cf.sel = (cf.sel + 1) % cf.pts.length;
+  drawCorners(); updateCornerBar();
+};
+$('#cfUse').onclick = async () => {
+  const nf = Object.keys(cf.found).length;
+  if (!(await confirmBox(`Update the boundary with the ${nf} corner${nf > 1 ? 's' : ''} you found? Corners you didn’t find stay where the tax map has them.`, 'Update boundary'))) return;
+  P.boundary = cf.pts.map((p, i) => cf.found[i] ? [cf.found[i].lat, cf.found[i].lon] : p); P.boundarySrc = (P.boundarySrc || 'tax map') + ' + found corners';
+  save(); drawBoundary(); stopCornerFind(); toast('Boundary updated with the corners you found');
+};
+TIPS.corners = { title: 'Finding property corners', mark: 'Walk toward the corner — the arrow and distance update as you move.',
+  how: ['The tax map and phone GPS are each off by 10–30 ft or more, so look for the iron pin, rebar, concrete monument, or fence corner when you’re within about 30 ft.', 'Use a metal detector for buried pins — they’re often a few inches under the leaves.', 'When you find it, stand on it and tap <b>📍 Found it — mark here</b>. Then go to the next corner.', '<b>Use found corners</b> updates the boundary with where the pins really are.', 'This helps you price the job — it isn’t a survey. Call a surveyor for line disputes or if pins are missing.'], ex: '' };
+async function parcelDialog(after) {
+  const src = parcelSrc(), card = $('#modalCard'); card.classList.remove('wide');
+  const opts = [['none', 'Off'], ['file', src.type === 'file' && src.name ? `Imported file — ${src.name}` : 'Imported parcel file'], ...PARCEL_COUNTIES.map(([n, u]) => ['svc:' + u, `${n} County (online)`]), ['custom', 'Other county — paste a parcel layer link']];
+  const cur = src.type === 'service' ? (PARCEL_COUNTIES.some(([, u]) => u === src.url) ? 'svc:' + src.url : 'custom') : src.type;
+  card.innerHTML = `<div class="row" style="align-items:center;margin-bottom:6px"><h2 style="margin:0">🗺 Tax parcel map</h2><button class="sec" id="pdClose" style="flex:0 0 auto">Close</button></div>
+    <p class="muted" style="margin:0 0 8px">Shows county tax parcel lines on the map. Tap your lot to use it as the boundary, or to walk to its corners.</p>
+    <label for="pdSrc">Tax map source</label><select id="pdSrc">${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+    <div id="pdCustom" ${cur === 'custom' ? '' : 'hidden'}><label for="pdUrl">ArcGIS parcel layer link</label><input id="pdUrl" value="${esc(src.type === 'service' ? src.url : '')}" placeholder="https://…/MapServer/0 or …/FeatureServer/0"></div>
+    <div class="row mt"><button class="sec" id="pdImport">📥 Import parcel file…</button></div>
+    <input type="file" id="pdFile" accept=".zip,.geojson,.json,.kml" class="hidden">
+    <label class="xrow mt"><input type="checkbox" id="pdShow" ${store.parcelShow ? 'checked' : ''}><span><b>Show tax parcels on the map</b><small>Yellow lines — zoom in close to see them</small></span></label>
+    <div class="tipcard"><div class="tiphead">Lumpkin, Dawson, White, Union…</div>These counties don’t publish a free online tax map. <b>Lumpkin County GIS</b> sells the parcel shapefile (call 706-864-6894) — import that .zip here once and it works offline for the whole county. You can also look up a parcel on <a href="${QPUBLIC_LUMPKIN}" target="_blank" rel="noopener">qPublic (Lumpkin)</a>.</div>
+    <div class="muted mt">Tax maps are approximate — often 10–50 ft off — and aren’t a survey.</div>
+    <div class="row" style="margin-top:14px"><button class="pri" id="pdSave">Save</button></div>`;
+  $('#modal').classList.remove('hidden');
+  const close = () => { $('#modal').classList.add('hidden'); };
+  $('#pdClose').onclick = close;
+  $('#pdSrc').onchange = e => { $('#pdCustom').hidden = e.target.value !== 'custom'; };
+  $('#pdImport').onclick = () => $('#pdFile').click();
+  $('#pdFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const n = await importParcelFile(f); store.parcelShow = true; save(true); toast(`Imported ${num(n)} parcels from ${f.name}`, 4000); parcelDialog(after); drawParcels(); }
+    catch (err) { toast(err.message || 'Could not read that file', 5000); }
+  };
+  $('#pdSave').onclick = () => {
+    const v = $('#pdSrc').value;
+    if (v === 'none') store.parcelSrc = { type: 'none' };
+    else if (v === 'file') { if (!parcelSrc().name && !parcelFile) { toast('Import a parcel file first'); return; } store.parcelSrc = Object.assign({}, parcelSrc(), { type: 'file' }); }
+    else if (v === 'custom') { const u = $('#pdUrl').value.trim(); if (!/^https:\/\/.+\/(MapServer|FeatureServer)\/\d+\/?$/i.test(u)) { toast('Paste a link ending in /MapServer/<number> or /FeatureServer/<number>', 4500); return; } store.parcelSrc = { type: 'service', url: u, name: 'Custom parcel layer' }; }
+    else { const u = v.slice(4), c = PARCEL_COUNTIES.find(([, x]) => x === u); store.parcelSrc = { type: 'service', url: u, name: c ? c[0] + ' County' : 'County' }; }
+    store.parcelShow = $('#pdShow').checked || store.parcelSrc.type !== 'none'; parcelCache = { key: '', feats: [] };
+    save(true); close(); drawParcels(); if (after) after();
+    if (store.parcelSrc.type !== 'none') toast(map.getZoom() < 15 ? 'Zoom in to see the tax parcels' : 'Tap your lot on the map', 3500);
+  };
+}
+
 // ---- typed work item → library item, unit and machine
 const EXAMPLES = ['Dig utility trench', 'Clear trees', 'Clear for building site', 'Grade building pad', 'Driveway stone', 'Seed & straw'];
 const GUESS = [
@@ -2903,13 +3370,15 @@ function takeoffHtml() {
       <label id="niMl">How is it measured?</label>
       <div class="seg" role="radiogroup" aria-labelledby="niMl">${[['lf', 'LF — length'], ['area', 'Area'], ['count', 'Count']].map(([k, l]) => `<button type="button" role="radio" data-nm="${k}">${l}</button>`).join('')}</div>
       <label for="niEq">Equipment</label><select id="niEq">${eqOpts}</select>
+      <div id="niTip"></div>
       <div class="muted" id="niHint" style="margin-top:6px"></div>
       <button class="pri big mt" id="niGo" style="width:100%">📏 Lay it out on the map</button>
     </div>
   </section>
   ${P.lines.length ? '<button class="pri big mt office" id="tkOffice" style="width:100%">📤 Send to office</button>' : ''}
   <div class="row mt"><button class="sec" id="tkAdd">Pick from my list</button>${P.lines.length ? `<button class="sec" id="tkEst">Estimate · ${money(E.total)}</button>` : ''}</div>
-  <div class="row mt">${P.lines.length ? '<button class="sec" id="tkPlan">📐 Drawing</button>' : ''}<button class="sec" id="tkMat">📋 Material prices</button></div>`;
+  <div class="row mt">${P.lines.length ? '<button class="sec" id="tkPlan">📐 Drawing</button>' : ''}<button class="sec" id="tkMat">📋 Material prices</button></div>
+  <button class="sec mt" id="tkTips" style="width:100%">💡 Tips — what to mark for each item</button>`;
 }
 function bindNewItem(all, on) {
   if (!$('#niDesc')) return;
@@ -2924,6 +3393,11 @@ function bindNewItem(all, on) {
     $('#niStep').hidden = !s.desc;
     document.querySelectorAll('[data-nm]').forEach(b => { const onb = b.dataset.nm === s.meas; b.classList.toggle('on', onb); b.setAttribute('aria-checked', String(onb)); });
     $('#niEq').value = s.equip;
+    const geom = s.meas === 'lf' ? 'line' : s.meas === 'count' ? 'points' : 'poly', tk = tipKeyFor(s.it.custom ? null : s.it.id, s.it.calc, geom);
+    const g = guessItem(s.desc), fits = Object.keys(g.by).filter(m => g.by[m]);
+    const mm = fits.length && !fits.includes(s.meas) ? `${s.meas === 'count' ? 'Count' : s.meas === 'lf' ? 'LF' : 'Area'} doesn’t usually fit “${esc(s.desc)}” — try <b>${fits.map(m => m === 'lf' ? 'LF' : m === 'count' ? 'Count' : 'Area').join(' or ')}</b>.` : '';
+    $('#niTip').innerHTML = s.desc ? tipCard(tk, mm) : '';
+    const more = $('#niTip').querySelector('[data-tip]'); if (more) more.onclick = () => showTip(more.dataset.tip, { force: true });
     const u = s.meas === 'lf' ? 'LF' : s.meas === 'count' ? 'EA' : (CALC[s.it.calc] || CALC.sf).unit;
     $('#niHint').textContent = s.it.custom ? `New item. Starts at ${NEW_PROD[s.meas]} ${u} per hour and no material; you can change both after it's laid out.`
       : `Priced like “${s.it.name}”: ${num(s.it.prod, s.it.prod < 1 ? 3 : s.it.prod < 10 ? 1 : 0)} ${s.it.calc === 'pad' || s.it.calc === 'grade' ? 'CY' : s.it.calc === 'stone' ? 'TON' : u} per hour${s.it.mat ? `, material $${num(s.it.mat, 2)} per unit` : ''}.${s.it.calc === 'pad' ? ' Walk or tap the house corners.' : ''}`;
@@ -3049,9 +3523,10 @@ function measureLine(Ln, o = {}) {
       calcCache.clear(); save(); if (o.after) o.after(Ln); else openLine(Ln.id);
     }, msg, { gps: true, noun, trace: geom !== 'points' });
   };
-  if (o.geom) go(o.geom);
-  else if (C.geom === 'line|poly') choiceBox('Measure stone', '', [['line', 'Run — centerline × width', 'Driveways and paths'], ['poly', 'Outline', 'Parking pads and odd shapes'], ['cancel', 'Cancel', '']]).then(k => { if (k !== 'cancel') go(k); });
-  else go(C.geom);
+  const goTip = async geom => { const tk = tipKeyFor(Ln.item, Ln.calc, geom); draw.tipKey = tk; if (await showTip(tk, { okText: 'Got it — start marking', cancel: true })) { go(geom); draw.tipKey = tk; $('#dTip').classList.remove('hidden'); } };
+  if (o.geom) goTip(o.geom);
+  else if (C.geom === 'line|poly') choiceBox('Measure stone', 'Driveway: walk the centerline (the width is added). Parking pad or odd shape: walk the outside edge.', [['line', 'Run — centerline × width', 'Driveways and paths'], ['poly', 'Outline', 'Parking pads and odd shapes'], ['cancel', 'Cancel', '']]).then(k => { if (k !== 'cancel') goTip(k); });
+  else goTip(C.geom);
 }
 // ---- building pad: ask for the finish slab elevation so the cut & fill can be figured
 async function ensureSurfaceFor(Ln) {
@@ -3103,6 +3578,7 @@ function bindTakeoff(all, on) {
   on('#tkAdd', addLineDialog);
   on('#tkOffice', sendToOffice);
   on('#tkMat', () => openMatBook());
+  on('#tkTips', tipsDialog);
   bindNewItem(all, on);
   on('#tkEst', () => setTab('estimate'));
   on('#tkPlan', planDialog);
@@ -3635,7 +4111,7 @@ async function installApp() {
 // ======================================================================
 // Boot
 // ======================================================================
-refreshMap(); render();
+restoreImagery(); refreshMap(); render();
 showSplash();
 if ('serviceWorker' in navigator && window.isSecureContext && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
 window.__app = { get P() { return P; }, sendToOffice, showSplash, startTakeoffFlow, openTakeoffEntry, guessItem, map, traceBoundary, setupBoundary, isWalking: () => walk.active, drawFeatures, onOpen, switchProject, newProject, toast, refreshMap, render, planSVG, bearingText, buildSurface, calcArea, estimate, startDraw, endDraw, draw, setTab, openArea, openLine, lineQty, migrateLines, store };

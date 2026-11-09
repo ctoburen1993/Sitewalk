@@ -57,12 +57,19 @@
   <button id="btnAddFeat" title="Add feature" aria-label="Add feature" aria-haspopup="menu">＋</button>
 </div>
 
+<div id="cornerBar" class="hidden" role="region" aria-label="Find property corners">
+  <div class="cfrow"><b id="cfTitle">Corner 1</b><button id="cfHelp" class="sec" aria-label="Tips">💡</button><button id="cfDone" class="sec">Done</button></div>
+  <div class="cfmain"><div id="cfArrow" aria-hidden="true">↑</div><div><div id="cfDist">—</div><div id="cfDir" class="muted"></div></div></div>
+  <div class="row"><button id="cfPrev" class="sec">‹ Prev</button><button id="cfMark" class="pri">📍 Found it — mark here</button><button id="cfNext" class="sec">Next ›</button></div>
+  <button id="cfUse" class="sec hidden" style="width:100%">Use found corners</button>
+</div>
 <div id="drawBar" class="hidden">
   <div id="drawMsg">Tap map to add corners</div>
   <div id="drawSub"></div>
   <div class="row" id="dGpsRow">
     <button id="dMark" class="pri big hidden">📍 Mark corner here</button>
     <button id="dTrace" class="sec hidden">〰 Trace</button>
+    <button id="dTip" class="sec hidden" aria-label="Tips for this item">💡</button>
   </div>
   <div class="row" id="dExtra">
     <button id="dGps" class="sec">+ My GPS spot</button>
